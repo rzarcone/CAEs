@@ -18,68 +18,96 @@ def read_image(filename_queue):
   cropped_image = preprocess_image(image)
   return cropped_image
 
+#general params
 file_location = "/home/dpaiton/Work/Datasets/imagenet/imgs.txt"
 num_gpus = 1
 num_threads = 5
-num_epochs = 300
-shuffle = True
+num_epochs = 1
 seed = 1234567890
 
-num_outputs = 800
+#image params
+shuffle = True
+num_epochs = 1
 batch_size = 100
-patch_size_y = 16
-patch_size_x = 16
-stride_y = 2
-stride_x = 2
 img_shape_y = 256
 img_shape_x = 256
 num_colors = 3
 
+#layer params
+learning_rate = 1e-4
+num_outputs = [128] 
+patch_size_y = [8]
+stride_y = [2]
+
+#queue params
 min_after_dequeue = 10  
+
+assert ((img_shape_y - patch_size_y[0]) % stride_y[0] == 0), (
+  "Patch & Stride must divide evenly into the image")
+
+patch_size_x = patch_size_y
+stride_x = stride_y
+im_shape = [img_shape_y, img_shape_x, num_colors]
 num_read_threads = num_threads * num_gpus
 capacity = min_after_dequeue + (num_read_threads + 1) * batch_size
 
-w_shape = [patch_size_y, patch_size_x, num_colors, num_outputs]
+w_shapes = [[py, px, 3, no] for py in patch_size_y for px in patch_size_x for no in num_outputs]
+
 graph = tf.Graph()
 with graph.as_default():
-# Make a list of filenames. Strip removes '\n' at the end
-# file_location contains image locations separated by newlines (piped from ls)
-filenames = tf.constant([string.strip()
-  for string
-  in open(file_location, "r").readlines()])
+  # Make a list of filenames. Strip removes '\n' at the end
+  # file_location contains image locations separated by newlines (piped from ls)
+  filenames = tf.constant([string.strip()
+    for string
+    in open(file_location, "r").readlines()])
 
-# Turn list of filenames into a string producer to feed names for each thread
-# Shuffling happens here - should be faster than shuffling after the images are loaded
-# Capacity is the max capacity of the queue - can be adjusted as needed
-filename_queue = tf.train.string_input_producer(filenames, num_epochs, shuffle=True, seed=seed,
-  capacity=capacity)
+  # Turn list of filenames into a string producer to feed names for each thread
+  # Shuffling happens here - should be faster than shuffling after the images are loaded
+  # Capacity is the max capacity of the queue - can be adjusted as needed
+  filename_queue = tf.train.string_input_producer(filenames, num_epochs, shuffle=shuffle,
+    seed=seed, capacity=capacity)
 
-# FIFO queue requires that all images have the same dtype & shape
-queue = tf.FIFOQueue(capacity, dtypes=[tf.float32], shapes=[256, 256, 3])
-# Enqueues one element at a time
-enqueue_op = queue.enqueue(read_image(filename_queue)) 
-# Reads a batch of images from the queue
-x = queue.dequeue_many(batch_size) # Requires that all images are the same shape
+  # FIFO queue requires that all images have the same dtype & shape
+  queue = tf.FIFOQueue(capacity, dtypes=[tf.float32], shapes=im_shape)
+  # Enqueues one element at a time
+  enqueue_op = queue.enqueue(read_image(filename_queue)) 
+  # Reads a batch of images from the queue
+  x = queue.dequeue_many(batch_size) # Requires that all images are the same shape
 
-# Holds a list of enqueue operations for a queue, each to be run in a thread.
-qr = tf.train.QueueRunner(queue, [enqueue_op] * num_read_threads)
+  # Holds a list of enqueue operations for a queue, each to be run in a thread.
+  qr = tf.train.QueueRunner(queue, [enqueue_op] * num_read_threads)
 
-global_step = tf.Variable(0, trainable=False, name="global_step")
+  global_step = tf.Variable(0, trainable=False, name="global_step")
 
-w = tf.get_variable(name="w", dtype=tf.float32,
-  initializer=tf.truncated_normal(w_shape, mean=0.0, stddev=1.0, dtype=tf.float32,
-  name="phi_init"), trainable=True)
-u = tf.nn.conv2d(x, w, [1, stride_y, stride_x, 1], padding="SAME", name="activation")
-x_ = tf.nn.conv2d_transpose(tf.nn.relu(u), w, tf.shape(x), [1, sride_y, stride_x, 1],
-  padding="SAME", name="reconstruction")
-loss = tf.mean(0.5 * tf.sum(tf.pow(tf.sub(x, x_), 2.0), reduction_indices=[1, 2, 3]))
-train_op = tf.train.GradientDescentOptimizer.minimize(loss, global_step=global_step)
+  w_enc = tf.get_variable(name="w_enc", dtype=tf.float32,
+    initializer=tf.truncated_normal(w_shapes[0], mean=0.0, stddev=1.0, dtype=tf.float32,
+    name="w_enc_init"), trainable=True)
+  u = tf.nn.relu(tf.nn.conv2d(x, w_enc, [1, stride_y[0], stride_x[0], 1], padding="SAME",
+    use_cudnn_on_gpu=True, name="activation"))
+  w_dec = tf.get_variable(name="w_dec", dtype=tf.float32,
+    initializer=tf.truncated_normal(w_shapes[0], mean=0.0, stddev=1.0, dtype=tf.float32,
+    name="w_dec_init"), trainable=True)
+  xh_ = tf.nn.conv2d_transpose(u, w_dec, [batch_size]+im_shape, [1, stride_y[0], stride_x[0], 1],
+    padding="SAME", name="reconstruction")
+  total_loss = tf.reduce_mean(tf.reduce_sum(tf.pow(tf.subtract(x,xh_), 2.0),
+    reduction_indices=[1,2,3]))
 
-# Must initialize local variables as well as global to init num_epochs
-# in tf.train.string_input_producer
-init_op = tf.group(tf.global_variables_initializer(), tf.local_variables_initializer())
+  optimizer = tf.train.GradientDescentOptimizer(learning_rate, name="grad_optimizer")
+  grads_and_vars = optimizer.compute_gradients(total_loss, var_list=[w_enc, w_dec])
+  train_op = optimizer.apply_gradients(grads_and_vars, global_step=global_step)
 
-with tf.Session() as sess:
+  MSE = tf.reduce_mean(tf.pow(tf.subtract(x, xh_), 2.0), name="mean_squared_error")
+  pSNRdB = tf.multiply(10.0, tf.log(tf.div(tf.pow(1.0, 2.0), MSE)), name="recon_quality")
+
+  gpu_options = tf.GPUOptions(per_process_gpu_memory_fraction=0.5)
+  config = tf.ConfigProto()
+  config.gpu_options.allow_growth = True
+
+  # Must initialize local variables as well as global to init num_epochs
+  # in tf.train.string_input_producer
+  init_op = tf.group(tf.global_variables_initializer(), tf.local_variables_initializer())
+
+with tf.Session(graph=graph) as sess:
   sess.run(init_op)
   # Coordinator manages threads, checks for stopping requests
   coord = tf.train.Coordinator()
@@ -92,12 +120,12 @@ with tf.Session() as sess:
   try:
     with coord.stop_on_exception():
       while not coord.should_stop():
-        #data = sess.run(x)
         sess.run(train_op)
         step = sess.run(global_step)
         if step % 10 == 0:
-          loss = sess.run(loss)
-          print("step %g loss %g"%(step, loss))
+          eval_total_loss = sess.run(total_loss)
+          snr = sess.run(pSNRdB)
+          print("step %g\tloss %g\tpSNRdB %g"%(step, eval_total_loss, snr))
   except tf.errors.OutOfRangeError:
     print("Done training -- epoch limit reached")
   finally:
