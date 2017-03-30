@@ -24,6 +24,39 @@ def read_image(filename_queue):
   cropped_image = preprocess_image(image)
   return cropped_image
 
+"""Make layer that does relu(conv(u,w)+b)"""
+def layer_maker(layer_num, u_in, w_shape, w_init, stride, transpose):
+  with tf.variable_scope('weights'+str(layer_num)):
+    w = tf.get_variable(name='w'+str(layer_num), shape=w_shape, dtype=tf.float32,
+      initializer=w_init, trainable=True)
+
+  with tf.name_scope('biases'+str(layer_num)) as scope:                                                             
+    if not transpose:
+      b = tf.Variable(tf.zeros(w_shape[3]), trainable=True,
+        name="latent_bias"+str(layer_num)) 
+    else:
+      b = tf.Variable(tf.zeros(w_shape[2]), trainable=True,
+        name="latent_bias"+str(layer_num)) 
+
+  with tf.name_scope("hidden"+str(layer_num)) as scope:
+    if not transpose:
+      u_out = tf.nn.relu(tf.add(tf.nn.conv2d(u_in, w, [1, stride, stride, 1], 
+        padding="SAME", use_cudnn_on_gpu=True), b), name="activation"+str(layer_num))
+    else:
+      height_const = tf.where(tf.equal(tf.mod(tf.shape(u_in)[1], stride), 0), 0, 1)
+      out_height = tf.shape(u_in)[1] * stride - height_const
+      width_const = tf.where(tf.equal(tf.mod(tf.shape(u_in)[2], stride), 0), 0, 1)
+      out_width = tf.shape(u_in)[2] * stride - width_const
+      out_shape = tf.stack([tf.cast(tf.shape(u_in)[0], tf.int32), # Batch
+        tf.cast(out_height, tf.int32), # Height
+        tf.cast(out_width, tf.int32), # Width
+        tf.constant(w_shape[2], dtype=tf.int32)]) # Channels
+      u_out = tf.nn.relu(tf.add(tf.nn.conv2d_transpose(u_in, w, out_shape,
+        strides=[1, stride, stride, 1], padding="SAME"), b),
+        name="activation"+str(layer_num))
+
+  return w, b, u_out
+
 #general params
 file_location = "/home/dpaiton/Work/Datasets/imagenet/imgs.txt"
 num_gpus = 1
@@ -42,20 +75,28 @@ num_colors = 3
 #layer params
 learning_rate = 1e-8
 decay_rate = 0.95 # for ADADELTA
-num_input_channels = [num_colors, 32]
-num_outputs = [32, 8] 
-patch_size_y = [3, 3]
-stride = [2, 2]
+input_channels = [num_colors]#[num_colors, 128, 128]
+output_channels = [128]#[128, 128, 128]
+patch_size_y = [9]#[9, 5, 5]
+strides = [2]#[4, 2, 2]
 
 #queue params
+patch_size_x = patch_size_y
+w_shapes = [vals for vals in zip(patch_size_y, patch_size_x, input_channels,
+  output_channels)]
+
+#decoding is inverse of encoding
+w_shapes += w_shapes[::-1]
+input_channels += input_channels[::-1]
+output_channels += output_channels[::-1]
+strides += strides[::-1]
+num_layers = len(w_shapes)
+
 min_after_dequeue = 10  
 
-patch_size_x = patch_size_y
 im_shape = [img_shape_y, img_shape_x, num_colors]
 num_read_threads = num_threads * num_gpus
 capacity = min_after_dequeue + (num_read_threads + 1) * batch_size
-
-w_shapes = [vals for vals in zip(patch_size_y, patch_size_x, num_input_channels, num_outputs)]
 
 graph = tf.Graph()
 with graph.as_default():
@@ -88,72 +129,43 @@ with graph.as_default():
   with tf.name_scope("step_counter") as scope:
     global_step = tf.Variable(0, trainable=False, name="global_step")
 
-  with tf.name_scope("weights1") as scope:
-    w_init = tf.contrib.layers.xavier_initializer_conv2d(uniform=False, seed=seed,
-      dtype=tf.float32)
-    w_enc = tf.get_variable(name="w_enc", shape=w_shapes[0], dtype=tf.float32,
-      initializer=w_init, trainable=True)
-    w_dec = tf.get_variable(name="w_dec", shape=w_shapes[0], dtype=tf.float32,
-      initializer=w_init, trainable=True)
+  w_list = []
+  u_list = [x]
+  b_list = []
 
-  with tf.name_scope("weights2") as scope:
-    w_init2 = tf.contrib.layers.xavier_initializer_conv2d(uniform=False, seed=seed,
-      dtype=tf.float32)
-    w_enc2 = tf.get_variable(name="w_enc2", shape=w_shapes[1], dtype=tf.float32,
-      initializer=w_init2, trainable=True)
-    w_dec2 = tf.get_variable(name="w_dec2", shape=w_shapes[1], dtype=tf.float32,
-      initializer=w_init2, trainable=True)
-
-  with tf.name_scope('biases') as scope:
-    b_hidden = tf.Variable(tf.zeros(num_outputs[0]), trainable=True, name="latent_bias")
-
-  with tf.name_scope('biases2') as scope:
-    b_hidden2 = tf.Variable(tf.zeros(num_outputs[1]), trainable=True, name="latent_bias")
-
-  with tf.name_scope("hidden") as scope:
-    u = tf.nn.relu(tf.add(tf.nn.conv2d(x, w_enc, [1, stride[0], stride[0], 1], padding="SAME",
-      use_cudnn_on_gpu=True, name="activation"), b_hidden))
-
-  with tf.name_scope("hidden2") as scope:
-    u2 = tf.nn.relu(tf.add(tf.nn.conv2d(u, w_enc2, [1, stride[1], stride[1], 1], padding="SAME",
-      use_cudnn_on_gpu=True, name="activation"), b_hidden2))
-
-  with tf.name_scope("deconv") as scope:
-    uh_ = tf.nn.relu(tf.nn.conv2d_transpose(u2, w_dec2, tf.shape(u),
-      strides=[1, stride[1], stride[1], 1], padding="SAME", name="reconstruction"))
-
-  with tf.name_scope("reconstruction") as scope:
-    xh_ = tf.nn.relu(tf.nn.conv2d_transpose(uh_, w_dec, [batch_size]+im_shape,
-      strides=[1, stride[0], stride[0], 1], padding="SAME", name="reconstruction"))
+  w_inits = [tf.contrib.layers.xavier_initializer_conv2d(uniform=False, seed=seed,
+    dtype=tf.float32) for _ in np.arange(num_layers/2)]
+  w_inits += w_inits # decode inits are the same as encode inits
+ 
+  for layer_idx, vals in enumerate(zip(w_shapes, strides)):
+    transpose = False if layer_idx < num_layers/2 else True
+    w, b, u_out = layer_maker(layer_idx, u_list[layer_idx], vals[0],
+      w_inits[layer_idx], vals[1], transpose)
+    w_list.append(w)
+    u_list.append(u_out)
+    b_list.append(b)
 
   with tf.name_scope("loss") as scope:
-    total_loss = tf.reduce_mean(tf.reduce_sum(tf.pow(tf.subtract(x, xh_), 2.0),
+    total_loss = tf.reduce_mean(tf.reduce_sum(tf.pow(tf.subtract(u_list[0], u_list[-1]), 2.0),
       reduction_indices=[1,2,3]))
 
   with tf.name_scope("optimizers") as scope:
     #optimizer = tf.train.AdadeltaOptimizer(learning_rate, rho=decay_rate, name="grad_optimizer")
+    train_vars = w_list + b_list
     optimizer = tf.train.GradientDescentOptimizer(learning_rate, name="grad_optimizer")
-    grads_and_vars = optimizer.compute_gradients(total_loss, var_list=[w_enc, w_enc2, w_dec, w_dec2, b_hidden, b_hidden2])
+    grads_and_vars = optimizer.compute_gradients(total_loss, var_list=train_vars)
     train_op = optimizer.apply_gradients(grads_and_vars, global_step=global_step)
 
   with tf.name_scope("performance_metrics") as scope:
-    MSE = tf.reduce_mean(tf.pow(tf.subtract(x, xh_), 2.0), name="mean_squared_error")
+    MSE = tf.reduce_mean(tf.pow(tf.subtract(u_list[0], u_list[-1]), 2.0), name="mean_squared_error")
     pSNRdB = tf.multiply(10.0, tf.log(tf.div(tf.pow(1.0, 2.0), MSE)), name="recon_quality")
 
-   
   with tf.name_scope("summaries") as scope:
-    tf.summary.image('x', x) 
-    tf.summary.image('xh',xh_)
-    tf.summary.histogram('x', x) 
-    tf.summary.histogram('xh',xh_)
-    tf.summary.histogram('w_enc', w_enc) 
-    tf.summary.histogram('w_dec', w_dec) 
-    tf.summary.histogram('bias', b_hidden) 
-    tf.summary.histogram('hidden_activations', u) 
-    tf.summary.histogram('w_enc2', w_enc2) 
-    tf.summary.histogram('w_dec2', w_dec2) 
-    tf.summary.histogram('bias2', b_hidden2) 
-    tf.summary.histogram('hidden_activations2', u2) 
+    tf.summary.image('input', u_list[0]) 
+    tf.summary.image('reconstruction',u_list[-1])
+    [tf.summary.histogram('u'+str(idx),u) for idx,u in enumerate(u_list)]
+    [tf.summary.histogram('w'+str(idx),w) for idx,w in enumerate(w_list)]
+    [tf.summary.histogram('b'+str(idx),b) for idx,b in enumerate(b_list)]
     tf.summary.scalar('total_loss', total_loss)
     tf.summary.scalar('MSE', MSE)
     tf.summary.scalar('pSNRdB', pSNRdB)
@@ -168,7 +180,7 @@ with graph.as_default():
   train_writer = tf.summary.FileWriter('/home/rzarcone/CAE_Project/CAEs' + '/train', graph)
   init_op = tf.group(tf.global_variables_initializer(), tf.local_variables_initializer())
 
-with tf.Session(graph=graph) as sess:
+with tf.Session(config=config, graph=graph) as sess:
   sess.run(init_op)
   # Coordinator manages threads, checks for stopping requests
   coord = tf.train.Coordinator()
@@ -181,6 +193,10 @@ with tf.Session(graph=graph) as sess:
   try:
     with coord.stop_on_exception():
       while not coord.should_stop():
+        #w_shapes = [sess.run(w).shape for w in w_list]
+        #u_shapes = [sess.run(u).shape for u in u_list]
+        #b_shapes = [sess.run(b).shape for b in b_list]
+        #import IPython; IPython.embed(); raise SystemExit
         sess.run(train_op)
         step = sess.run(global_step)
         if step % 10 == 0:
@@ -188,17 +204,23 @@ with tf.Session(graph=graph) as sess:
           summary = sess.run(merged)
           train_writer.add_summary(summary, step)
           weight_filename = "/home/rzarcone/CAE_Project/CAEs/train/weights/"
-          w_enc_eval = np.squeeze(sess.run(tf.transpose(w_enc, perm=[3,0,1,2]))) 
-          w_dec_eval = np.squeeze(sess.run(tf.transpose(w_dec, perm=[3,0,1,2]))) 
-          pf.save_data_tiled(w_enc_eval,
-            normalize=False, title="Encoding Weights", save_filename=weight_filename+"encode.png")
-          pf.save_data_tiled(w_dec_eval,
-            normalize=False, title="Decoding Weights", save_filename=weight_filename+"decode.png")
+          w_enc_eval = np.squeeze(sess.run(tf.transpose(w_list[0], perm=[3,0,1,2]))) 
+          pf.save_data_tiled(w_enc_eval, normalize=True, title="Weights0",
+            save_filename=weight_filename+"Weights_enc.png")
+          w_dec_eval = np.squeeze(sess.run(tf.transpose(w_list[-1], perm=[3,0,1,2]))) 
+          pf.save_data_tiled(w_dec_eval, normalize=True, title="Weights-1",
+            save_filename=weight_filename+"Weights_dec.png")
           ## Print stuff
           eval_total_loss = sess.run(total_loss)
           snr = sess.run(pSNRdB)
-          print("step %g\tloss %g\tpSNRdB %g"%(step, eval_total_loss, snr))
-          print("u shape %g\tu2 shape %g"%(sess.run(u).size/batch_size, sess.run(u2).size/batch_size))
+          print("step %g\t\tloss %g\tpSNRdB %g"%(step, eval_total_loss, snr))
+          #u_print_str = ""
+          #for idx, u in enumerate(u_list):
+          #  u_eval = sess.run(u)
+          #  u_shape = u_eval.shape
+          #  num_u = u_eval.size
+          #  u_print_str+="\tu"+str(idx)+"_shape: "+str(u_shape)+"\t"+str(num_u)+"\n"
+          #print(u_print_str)
         if step == 400:
           coord.request_stop()
   except tf.errors.OutOfRangeError:
