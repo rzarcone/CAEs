@@ -26,34 +26,26 @@ def read_image(filename_queue):
 
 """Devisive normalizeation nonlinearity"""
 def gdn(layer_num, u_in, inverse):
-  ##TODO:
-  ##  deconv results in unknown dimensions (because img dim isn't known?)
-  ##  unknown dims are fine for normal deconv, but something in GDN is breaking it
-  ##  brian says he has done tf.multiply() and it didn't crash
-  ##  error indicates that it is happening because of the tf.stack call
-  ##  need to set up small script to test this
-  ##  Brian suggests hard coding all of the dims (in deconv and elsewhere) to see if that fixes it
-  u_in_shape = u_in.shape.dims
+  u_in_shape = u_in.get_shape()
   with tf.name_scope("gdn"+str(layer_num)) as scope:
-    b_gdn = tf.Variable(tf.zeros(u_in_shape[3]), trainable=True,
-      name="gdn_bias"+str(layer_num))
+    small_const = tf.multiply(tf.ones(u_in_shape[3]),1e-3)
+    b_gdn = tf.Variable(tf.add(tf.zeros(u_in_shape[3]), small_const), 
+      trainable=True, name="gdn_bias"+str(layer_num))
     norm_weights_shape = [u_in_shape[3]]*2
     norm_weights = tf.Variable(tf.ones(shape=norm_weights_shape,
       dtype=tf.float32), trainable=True, name="norm_weights"+str(layer_num))
-    #print("layer_num="+str(layer_num))
-    #print(inverse)
-    #print(u_in.shape)
-    #print([u_in_shape[0]*u_in_shape[1]*u_in_shape[2], u_in_shape[3]])
     collapsed_u_sq = tf.reshape(tf.square(u_in),
       shape=tf.stack([u_in_shape[0]*u_in_shape[1]*u_in_shape[2], u_in_shape[3]]))
     weighted_norm = tf.reshape(tf.matmul(collapsed_u_sq, norm_weights),
       shape=tf.stack([u_in_shape[0], u_in_shape[1], u_in_shape[2], u_in_shape[3]]))
-    GDN_const = tf.sqrt(tf.add(b_gdn, weighted_norm))
+    GDN_const = tf.sqrt(tf.add(weighted_norm,b_gdn))
     if inverse:
       u_out = tf.multiply(u_in, GDN_const, name="u_gdn"+str(layer_num))
     else:
-      u_out = tf.divide(u_in, GDN_const, name="u_gdn"+str(layer_num))
-    print(u_out.shape)
+      zero = tf.constant(0, dtype=tf.float32)
+      where = tf.not_equal(GDN_const,zero)
+      u_out = tf.where(where,tf.divide(u_in, GDN_const), u_in, name="u_gdn"+str(layer_num))
+
   return u_out
 
 """
@@ -61,8 +53,6 @@ Make layer that does activation(conv(u,w)+b)
   where activation() is either relu or GDN
 """
 def layer_maker(layer_num, u_in, w_shape, w_init, stride, decode, relu, god_damn_network):
-  #print("layer_maker")
-  #print(u_in.shape)
   with tf.variable_scope("weights"+str(layer_num)):
     w = tf.get_variable(name="w"+str(layer_num), shape=w_shape, dtype=tf.float32,
       initializer=w_init, trainable=True)
@@ -79,25 +69,22 @@ def layer_maker(layer_num, u_in, w_shape, w_init, stride, decode, relu, god_damn
     if decode:
       if god_damn_network:
         u_in = gdn(layer_num, u_in, decode)
-      #print(u_in.shape)
-      height_const = tf.where(tf.equal(tf.mod(tf.shape(u_in)[1], stride), 0), 0, 1)
-      out_height = tf.shape(u_in)[1] * stride - height_const
-      width_const = tf.where(tf.equal(tf.mod(tf.shape(u_in)[2], stride), 0), 0, 1)
-      out_width = tf.shape(u_in)[2] * stride - width_const
-      out_shape = tf.stack([tf.cast(tf.shape(u_in)[0], tf.int32), # Batch
-        tf.cast(out_height, tf.int32), # Height
-        tf.cast(out_width, tf.int32), # Width
+      height_const = 0 if u_in.get_shape()[1] % stride == 0 else 1
+      out_height = (u_in.get_shape()[1] * stride) - height_const
+      width_const = 0 if u_in.get_shape()[2] % stride == 0 else 1
+      out_width = (u_in.get_shape()[2] * stride) - width_const
+      out_shape = tf.stack([u_in.get_shape()[0], # Batch
+        out_height, # Height
+        out_width, # Width
         tf.constant(w_shape[2], dtype=tf.int32)]) # Channels
       u_out = tf.add(tf.nn.conv2d_transpose(u_in, w, out_shape,
         strides=[1, stride, stride, 1], padding="SAME"), b,
         name="activation"+str(layer_num))
-      #print(u_out.shape)
       if relu:
         u_out = tf.nn.relu(u_out, name="relu_activation")
     else:
       u_out = tf.add(tf.nn.conv2d(u_in, w, [1, stride, stride, 1],
         padding="SAME", use_cudnn_on_gpu=True), b, name="activation"+str(layer_num))
-      #print(u_out.shape)
       if relu:
         u_out = tf.nn.relu(u_out, name="relu_activation")
       if god_damn_network:
@@ -130,13 +117,13 @@ num_colors = 3
 batches_per_epoch = 450
 
 #learning rates
-init_learning_rate = 1e-5
+init_learning_rate = 1e-5 
 decay_steps = 0.5*batch_size*batches_per_epoch
 staircase = True
 decay_rate = 0.8 # for ADADELTA
 
 #layer params
-god_damn_network = False
+god_damn_network = True
 relu = False
 input_channels = [num_colors,192,192]#[num_colors, 128, 128]
 output_channels = [192,192,192]#[128, 128, 128]
@@ -200,10 +187,10 @@ with graph.as_default():
     dtype=tf.float32) for _ in np.arange(num_layers/2)]
   w_inits += w_inits # decode inits are the same as encode inits
  
-  for layer_idx, vals in enumerate(zip(w_shapes, strides)):
+  for layer_idx, w_shapes_strides in enumerate(zip(w_shapes, strides)):
     decode = False if layer_idx < num_layers/2 else True
-    w, b, u_out = layer_maker(layer_idx, u_list[layer_idx], vals[0],
-      w_inits[layer_idx], vals[1], decode, relu, god_damn_network)
+    w, b, u_out = layer_maker(layer_idx, u_list[layer_idx], w_shapes_strides[0],
+      w_inits[layer_idx], w_shapes_strides[1], decode, relu, god_damn_network)
     w_list.append(w)
     u_list.append(u_out)
     b_list.append(b)
