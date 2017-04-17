@@ -9,6 +9,7 @@ def preprocess_image(image):
   cropped_image = tf.image.resize_image_with_crop_or_pad(image, 256, 256)
   cropped_image = tf.to_float(cropped_image, name="ToFlaot")
   cropped_image = tf.div(cropped_image, 255.0)
+  cropped_image = tf.subtract(cropped_image, tf.reduce_mean(cropped_image))
   ## grayscale ## 
   #cropped_image = tf.image.rgb_to_grayscale(cropped_image)
   return cropped_image
@@ -31,22 +32,22 @@ def gdn(layer_num, u_in, inverse):
     #small_const = tf.multiply(tf.ones(u_in_shape[3]),2e-5)
     small_const = tf.multiply(tf.ones(u_in_shape[3]),1e-3)
     b_gdn = tf.Variable(tf.add(tf.zeros(u_in_shape[3]), small_const), 
-      trainable=True, name="gdn_bias"+str(layer_num))
+      trainable=True, dtype=tf.float32,  name="gdn_bias"+str(layer_num))
+    b_threshold = tf.where(tf.less(b_gdn, tf.constant(1e-3, dtype=tf.float32)),
+      tf.multiply(tf.ones_like(b_gdn), 1e-3), b_gdn)
     w_gdn_shape = [u_in_shape[3]]*2
-    w_gdn = tf.Variable(tf.multiply(tf.ones(shape=w_gdn_shape, dtype=tf.float32), 1e-3),
-      trainable=True, name="w_gdn"+str(layer_num))
+    w_gdn_init = tf.multiply(tf.ones(shape=w_gdn_shape, dtype=tf.float32), 1e-3)
+    w_gdn = tf.Variable(w_gdn_init, trainable=True, name="w_gdn"+str(layer_num))
+    w_threshold = tf.where(tf.less(w_gdn, tf.constant(1e-3, dtype=tf.float32)), w_gdn_init, w_gdn)
     collapsed_u_sq = tf.reshape(tf.square(u_in),
       shape=tf.stack([u_in_shape[0]*u_in_shape[1]*u_in_shape[2], u_in_shape[3]]))
-    #weighted_norm = tf.reshape(tf.matmul(collapsed_u_sq,tf.add(w_gdn, tf.transpose(w_gdn))),
-    #  shape=tf.stack([u_in_shape[0], u_in_shape[1], u_in_shape[2], u_in_shape[3]]))
-    weighted_norm = tf.reshape(tf.matmul(collapsed_u_sq, w_gdn),
-      shape=tf.stack([u_in_shape[0], u_in_shape[1], u_in_shape[2], u_in_shape[3]]))
-    GDN_const = tf.sqrt(tf.add(weighted_norm,b_gdn))
+    weighted_norm = tf.reshape(tf.matmul(collapsed_u_sq,tf.add(w_threshold,
+      tf.transpose(w_threshold))), shape=tf.stack([u_in_shape[0], u_in_shape[1], u_in_shape[2],
+      u_in_shape[3]]))
+    GDN_const = tf.sqrt(tf.add(weighted_norm, b_threshold))
     if inverse:
       u_out = tf.multiply(u_in, GDN_const, name="u_gdn"+str(layer_num))
     else:
-      #u_out = tf.where(tf.less(GDN_const, tf.constant(1e-10, dtype=tf.float32)), u_in,
-      #  tf.divide(u_in, GDN_const), name="u_gdn"+str(layer_num))
       u_out = tf.where(tf.less(GDN_const, tf.constant(1e-7, dtype=tf.float32)), u_in,
         tf.divide(u_in, GDN_const), name="u_gdn"+str(layer_num))
   return u_out, b_gdn, w_gdn
@@ -123,10 +124,10 @@ num_colors = 3
 batches_per_epoch = 450
 
 #learning rates
-init_learning_rate = 1e-5
-decay_steps = 100 #0.5*batch_size*batches_per_epoch
+init_learning_rate = 1e-4
+decay_steps = 600 #0.5*batch_size*batches_per_epoch
 staircase = True
-decay_rate = 0.8 # for ADADELTA
+decay_rate = 0.1 # for ADADELTA
 
 #layer params
 god_damn_network = True
@@ -246,7 +247,7 @@ with tf.device(gpu_id):
     config = tf.ConfigProto()
     config.gpu_options.per_process_gpu_memory_fraction=0.5
     config.gpu_options.allow_growth = True
-    config.log_device_placement = True
+    config.log_device_placement = False # for debugging - log devices used by each variable
 
     # Must initialize local variables as well as global to init num_epochs
     # in tf.train.string_input_produce
@@ -269,17 +270,18 @@ with tf.Session(config=config, graph=graph) as sess:
     for i in range(batches_per_epoch):
       sess.run(train_op)
       step = sess.run(global_step)
-      if step % 1 == 0:
+      if step % 10 == 0:
         ### SUMMARY ##
         summary = sess.run(merged)
         train_writer.add_summary(summary, step)
-        weight_filename = "/home/rzarcone/CAE_Project/CAEs/train/weights/"
-        w_enc_eval = np.squeeze(sess.run(tf.transpose(w_list[0], perm=[3,0,1,2])))
-        pf.save_data_tiled(w_enc_eval, normalize=True, title="Weights0",
-          save_filename=weight_filename+"Weights_enc.png")
-        w_dec_eval = np.squeeze(sess.run(tf.transpose(w_list[-1], perm=[3,0,1,2])))
-        pf.save_data_tiled(w_dec_eval, normalize=True, title="Weights-1",
-          save_filename=weight_filename+"Weights_dec.png")
+        # TODO: Verify that save_data_tiled correctly saves color weights
+        #weight_filename = "/home/rzarcone/CAE_Project/CAEs/train/weights/"
+        #w_enc_eval = np.squeeze(sess.run(tf.transpose(w_list[0], perm=[3,0,1,2])))
+        #pf.save_data_tiled(w_enc_eval, normalize=True, title="Weights0",
+        #  save_filename=weight_filename+"Weights_enc.png")
+        #w_dec_eval = np.squeeze(sess.run(tf.transpose(w_list[-1], perm=[3,0,1,2])))
+        #pf.save_data_tiled(w_dec_eval, normalize=True, title="Weights-1",
+        #  save_filename=weight_filename+"Weights_dec.png")
         ## Print stuff
         eval_total_loss = sess.run(total_loss)
         snr = sess.run(pSNRdB)
