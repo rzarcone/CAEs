@@ -3,6 +3,8 @@ matplotlib.use("Agg")
 import tensorflow as tf
 import utils.plot_functions as pf
 import numpy as np
+import utils.get_data as get_data
+import utils.mem_utils as mem_utils
 
 """Function to preprocess a single image"""
 def preprocess_image(image):
@@ -24,6 +26,22 @@ def read_image(filename_queue):
   # We want all images to be of the same size
   cropped_image = preprocess_image(image)
   return cropped_image
+
+def memristorize(u_in, memristor_std_eps):
+  with tf.name_scope("memristor_transform") as scope:
+    path = 'data/Partial_Reset_PCM.pkl'
+    #n_mem = tf.reduce_prod(u_out.get_shape()[1:])
+    n_mem = 49152
+    (vs_data, mus_data, sigs_data,
+      orig_VMIN, orig_VMAX, orig_RMIN,
+      orig_RMAX) = get_data.get_memristor_data(path, n_mem, num_ext=5,
+      norm_min=mem_v_min, norm_max=mem_v_max)
+    v_clip = tf.clip_by_value(u_in, clip_value_min=mem_v_min, clip_value_max=mem_v_max)
+    #v_trans = tensor_scaler(v_clip,orig_VMIN,orig_VMAX)
+    r = mem_utils.memristor_output(v_clip, memristor_std_eps, vs_data, mus_data, sigs_data,
+      interp_width=np.array(vs_data[1, 0] - vs_data[0, 0]).astype('float32'))
+    #r_trans =  tensor_scaler(r, orig_RMIN, orig_RMAX)
+    return tf.reshape(r, shape=u_in.get_shape(), name="mem_r")
 
 """Devisive normalizeation nonlinearity"""
 def gdn(layer_num, u_in, inverse):
@@ -112,30 +130,34 @@ file_location = "/home/dpaiton/Work/Datasets/imagenet/imgs.txt"
 num_gpus = 1
 gpu_id = "/gpu:0"
 num_threads = 5
-num_epochs = 10
+num_epochs = 20
 seed = 1234567890
 
 #image params
 shuffle = True
-batch_size = 100
+batch_size = 50
 img_shape_y = 256
 img_shape_x = 256
 num_colors = 3
-batches_per_epoch = 450
+batches_per_epoch = 900 #450
 
 #learning rates
-init_learning_rate = 1e-4
-decay_steps = 600 #0.5*batch_size*batches_per_epoch
+init_learning_rate = 5e-4
+decay_steps = 1000 #0.5*batch_size*batches_per_epoch
 staircase = True
-decay_rate = 0.1 # for ADADELTA
+decay_rate = 0.9 # for ADADELTA
 
 #layer params
+memristorify = True
 god_damn_network = True
 relu = False
 input_channels = [num_colors,192,192]#[num_colors, 128, 128]
 output_channels = [192,192,192]#[128, 128, 128]
 patch_size_y = [9,5,5]#[9, 5, 5]
 strides = [4,2,2]#[4, 2, 2]
+GAMMA = 1.0  # slope of the out of bounds cost
+mem_v_min = -1.0
+mem_v_max = 1.0
 
 #queue params
 patch_size_x = patch_size_y
@@ -201,15 +223,27 @@ with tf.device(gpu_id):
       decode = False if layer_idx < num_layers/2 else True
       w, b, u_out, b_gdn, w_gdn = layer_maker(layer_idx, u_list[layer_idx], w_shapes_strides[0],
         w_inits[layer_idx], w_shapes_strides[1], decode, relu, god_damn_network)
+      if memristorify:
+        if layer_idx == num_layers/2-1:
+          with tf.variable_scope("loss") as scope:
+            # Penalty for going out of bounds
+            reg_loss = tf.reduce_mean(tf.reduce_sum(GAMMA * (tf.nn.relu(u_out- mem_v_max)
+              + tf.nn.relu(mem_v_min - u_out)), axis=[1,2,3]))
+          with tf.name_scope("placeholders") as scope:
+            #n_mem = tf.reduce_prod(u_out.get_shape()[1:])
+            n_mem = 49152
+            memristor_std_eps = tf.placeholder(tf.float32, shape=(u_out.get_shape()[0], n_mem))
+          u_out = memristorize(u_out, memristor_std_eps)
       w_list.append(w)
       u_list.append(u_out)
       b_list.append(b)
       b_gdn_list.append(b_gdn)
       w_gdn_list.append(w_gdn)
 
-    with tf.name_scope("loss") as scope:
-      total_loss = tf.reduce_mean(tf.reduce_sum(tf.pow(tf.subtract(u_list[0], u_list[-1]), 2.0),
-        reduction_indices=[1,2,3]))
+    with tf.variable_scope("loss") as scope:
+      recon_loss = tf.reduce_mean(tf.reduce_sum(tf.pow(tf.subtract(u_list[0], u_list[-1]), 2.0),
+        axis=[1,2,3]))
+      total_loss = tf.add_n([recon_loss, reg_loss], name="total_loss")
 
     with tf.name_scope("optimizers") as scope:
       learning_rates = tf.train.exponential_decay(
@@ -228,8 +262,10 @@ with tf.device(gpu_id):
       train_op = optimizer.apply_gradients(grads_and_vars, global_step=global_step)
 
     with tf.name_scope("performance_metrics") as scope:
-      MSE = tf.reduce_mean(tf.pow(tf.subtract(u_list[0], u_list[-1]), 2.0), name="mean_squared_error")
-      pSNRdB = tf.multiply(10.0, tf.log(tf.div(tf.pow(1.0, 2.0), MSE)), name="recon_quality")
+      MSE = tf.reduce_mean(tf.square(tf.subtract(u_list[0],
+        tf.clip_by_value(u_list[-1], clip_value_min=-1.0, clip_value_max=1.0))),
+        name="mean_squared_error")
+      SNRdB = tf.multiply(10.0, tf.log(tf.div(tf.square(tf.nn.moments(u_list[0], axes=[0,1,2,3])[1]), MSE)), name="recon_quality")
 
     with tf.name_scope("summaries") as scope:
       tf.summary.image("input", u_list[0])
@@ -241,11 +277,11 @@ with tf.device(gpu_id):
       [tf.summary.histogram("w_gdn"+str(idx),w) for idx,w in enumerate(w_gdn_list)]
       tf.summary.scalar("total_loss", total_loss)
       tf.summary.scalar("MSE", MSE)
-      tf.summary.scalar("pSNRdB", pSNRdB)
+      tf.summary.scalar("SNRdB", SNRdB)
 
     #gpu_options = tf.GPUOptions(per_process_gpu_memory_fraction=0.5)
     config = tf.ConfigProto()
-    config.gpu_options.per_process_gpu_memory_fraction=0.5
+    #config.gpu_options.per_process_gpu_memory_fraction=0.5
     config.gpu_options.allow_growth = True
     config.log_device_placement = False # for debugging - log devices used by each variable
 
@@ -268,11 +304,15 @@ with tf.Session(config=config, graph=graph) as sess:
     _ = tf.train.start_queue_runners(sess, coord, start=True)
     enqueue_threads = qr.create_threads(sess, coord=coord, start=True)
     for i in range(batches_per_epoch):
-      sess.run(train_op)
+      #n_mem_eval = sess.run(tf.to_int32(tf.size(u_list[int(num_layers/2)])/u_list[int(num_layers/2)].get_shape()[0]))
+      n_mem_eval = 49152
+      mem_std_eps = np.random.standard_normal((batch_size, n_mem_eval)).astype(np.float32)
+      feed_dict={memristor_std_eps:mem_std_eps}
+      sess.run(train_op, feed_dict=feed_dict)
       step = sess.run(global_step)
       if step % 10 == 0:
         ### SUMMARY ##
-        summary = sess.run(merged)
+        summary = sess.run(merged, feed_dict=feed_dict)
         train_writer.add_summary(summary, step)
         # TODO: Verify that save_data_tiled correctly saves color weights
         #weight_filename = "/home/rzarcone/CAE_Project/CAEs/train/weights/"
@@ -283,9 +323,11 @@ with tf.Session(config=config, graph=graph) as sess:
         #pf.save_data_tiled(w_dec_eval, normalize=True, title="Weights-1",
         #  save_filename=weight_filename+"Weights_dec.png")
         ## Print stuff
-        eval_total_loss = sess.run(total_loss)
-        snr = sess.run(pSNRdB)
-        print("step %g\tloss %g\tpSNRdB %g"%(step, eval_total_loss, snr))
+        [ev_reg_loss, ev_recon_loss, ev_total_loss] = sess.run([reg_loss, recon_loss, total_loss],
+          feed_dict=feed_dict)
+        snr = sess.run(SNRdB, feed_dict=feed_dict)
+        print("step %04d\treg_loss %03g\trecon_loss %g\ttotal_loss %g\tSNRdB %g"%(
+          step, ev_reg_loss, ev_recon_loss, ev_total_loss, snr))
         #u_print(u_list)
   coord.request_stop()
   coord.join(enqueue_threads)
