@@ -1,5 +1,7 @@
 import matplotlib
 matplotlib.use("Agg")
+
+import os
 import tensorflow as tf
 import utils.plot_functions as pf
 import numpy as np
@@ -12,7 +14,7 @@ def preprocess_image(image):
   cropped_image = tf.to_float(cropped_image, name="ToFlaot")
   cropped_image = tf.div(cropped_image, 255.0)
   cropped_image = tf.subtract(cropped_image, tf.reduce_mean(cropped_image))
-  ## grayscale ## 
+  ## grayscale ##
   #cropped_image = tf.image.rgb_to_grayscale(cropped_image)
   return cropped_image
 
@@ -49,7 +51,7 @@ def gdn(layer_num, u_in, inverse):
   with tf.name_scope("gdn"+str(layer_num)) as scope:
     #small_const = tf.multiply(tf.ones(u_in_shape[3]),2e-5)
     small_const = tf.multiply(tf.ones(u_in_shape[3]),1e-3)
-    b_gdn = tf.Variable(tf.add(tf.zeros(u_in_shape[3]), small_const), 
+    b_gdn = tf.Variable(tf.add(tf.zeros(u_in_shape[3]), small_const),
       trainable=True, dtype=tf.float32,  name="gdn_bias"+str(layer_num))
     b_threshold = tf.where(tf.less(b_gdn, tf.constant(1e-3, dtype=tf.float32)),
       tf.multiply(tf.ones_like(b_gdn), 1e-3), b_gdn)
@@ -84,10 +86,10 @@ def layer_maker(layer_num, u_in, w_shape, w_init, stride, decode, relu, god_damn
   with tf.name_scope("biases"+str(layer_num)) as scope:
     if decode:
       b = tf.Variable(tf.zeros(w_shape[2]), trainable=True,
-        name="latent_bias"+str(layer_num)) 
+        name="latent_bias"+str(layer_num))
     else:
       b = tf.Variable(tf.zeros(w_shape[3]), trainable=True,
-        name="latent_bias"+str(layer_num)) 
+        name="latent_bias"+str(layer_num))
 
   with tf.name_scope("hidden"+str(layer_num)) as scope:
     if decode:
@@ -127,6 +129,7 @@ def u_print(u_list):
 
 #general params
 file_location = "/home/dpaiton/Work/Datasets/imagenet/imgs.txt"
+output_location = os.path.expanduser("~")+"/CAE_Project/CAEs/train/"
 num_gpus = 1
 gpu_id = "/gpu:0"
 num_threads = 5
@@ -151,10 +154,10 @@ decay_rate = 0.9 # for ADADELTA
 memristorify = True
 god_damn_network = True
 relu = False
-input_channels = [num_colors,192,192]#[num_colors, 128, 128]
-output_channels = [192,192,192]#[128, 128, 128]
-patch_size_y = [9,5,5]#[9, 5, 5]
-strides = [4,2,2]#[4, 2, 2]
+input_channels = [num_colors, 192, 192]#[num_colors, 128, 128]
+output_channels = [192, 192, 192]#[128, 128, 128]
+patch_size_y = [9, 5, 5]#[9, 5, 5]
+strides = [4, 2, 2]#[4, 2, 2]
 GAMMA = 1.0  # slope of the out of bounds cost
 mem_v_min = -1.0
 mem_v_max = 1.0
@@ -196,7 +199,7 @@ with tf.device(gpu_id):
       # FIFO queue requires that all images have the same dtype & shape
       queue = tf.FIFOQueue(capacity, dtypes=[tf.float32], shapes=im_shape)
       # Enqueues one element at a time
-      enqueue_op = queue.enqueue(read_image(filename_queue)) 
+      enqueue_op = queue.enqueue(read_image(filename_queue))
 
     with tf.name_scope("input") as scope:
       # Reads a batch of images from the queue
@@ -218,7 +221,7 @@ with tf.device(gpu_id):
     w_inits = [tf.contrib.layers.xavier_initializer_conv2d(uniform=False, seed=seed,
       dtype=tf.float32) for _ in np.arange(num_layers/2)]
     w_inits += w_inits # decode inits are the same as encode inits
-   
+
     for layer_idx, w_shapes_strides in enumerate(zip(w_shapes, strides)):
       decode = False if layer_idx < num_layers/2 else True
       w, b, u_out, b_gdn, w_gdn = layer_maker(layer_idx, u_list[layer_idx], w_shapes_strides[0],
@@ -267,6 +270,8 @@ with tf.device(gpu_id):
         name="mean_squared_error")
       SNRdB = tf.multiply(10.0, tf.log(tf.div(tf.square(tf.nn.moments(u_list[0], axes=[0,1,2,3])[1]), MSE)), name="recon_quality")
 
+    full_saver = tf.train.Saver(var_list=train_vars, max_to_keep=2)
+
     with tf.name_scope("summaries") as scope:
       tf.summary.image("input", u_list[0])
       tf.summary.image("reconstruction",u_list[-1])
@@ -288,7 +293,7 @@ with tf.device(gpu_id):
     # Must initialize local variables as well as global to init num_epochs
     # in tf.train.string_input_produce
     merged = tf.summary.merge_all()
-    train_writer = tf.summary.FileWriter("/home/rzarcone/CAE_Project/CAEs" + "/train", graph)
+    train_writer = tf.summary.FileWriter(output_location, graph)
     init_op = tf.group(tf.global_variables_initializer(), tf.local_variables_initializer())
 
 with tf.Session(config=config, graph=graph) as sess:
@@ -329,5 +334,6 @@ with tf.Session(config=config, graph=graph) as sess:
         print("step %04d\treg_loss %03g\trecon_loss %g\ttotal_loss %g\tSNRdB %g"%(
           step, ev_reg_loss, ev_recon_loss, ev_total_loss, snr))
         #u_print(u_list)
+    full_saver.save(sess, save_path=output_location+"/checkpoints/chkpt_", global_step=global_step)
   coord.request_stop()
   coord.join(enqueue_threads)
