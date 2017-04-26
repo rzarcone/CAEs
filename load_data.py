@@ -2,6 +2,7 @@ import tensorflow as tf
 
 """Function to preprocess a single image"""
 def preprocess_image(image):
+  # We want all images to be of the same size
   cropped_image = tf.image.resize_image_with_crop_or_pad(image, 256, 256)
   return cropped_image
 
@@ -11,14 +12,13 @@ def read_image(filename_queue):
   image_reader = tf.WholeFileReader()
   filename, image_file = image_reader.read(filename_queue)
   # If the image has 1 channel (grayscale) it will broadcast to 3
-  image = tf.image.decode_jpeg(image_file, channels=3)
-  # We want all images to be of the same size
+  image = tf.image.decode_image(image_file, channels=3)
   cropped_image = preprocess_image(image)
   return cropped_image
 
-file_location = "/home/dpaiton/Work/Datasets/imagenet/imgs.txt"
-num_epochs = 1
-batch_size = 100
+file_location = "/media/tbell/datasets/imagenet/imgs.txt"
+num_epochs = 30 
+batch_size = 25 
 num_read_threads = 10
 min_after_dequeue = 10  
 seed = 1234
@@ -33,7 +33,7 @@ filenames = tf.constant([string.strip()
 # Turn list of filenames into a string producer to feed names for each thread
 # Shuffling happens here - should be faster than shuffling after the images are loaded
 # Capacity is the max capacity of the queue - can be adjusted as needed
-filename_queue = tf.train.string_input_producer(filenames, num_epochs, shuffle=True, seed=seed,
+filename_queue = tf.train.string_input_producer(filenames, num_epochs, shuffle=False, seed=seed,
   capacity=capacity)
 
 # FIFO queue requires that all images have the same dtype & shape
@@ -65,7 +65,7 @@ with tf.Session() as sess:
       while not coord.should_stop():
         data = sess.run(images)
   except tf.errors.OutOfRangeError:
-    print("Done training -- epoch limit reached")
+    print ('OutofRangeError!')
   finally:
     coord.request_stop()
   coord.join(enqueue_threads)
