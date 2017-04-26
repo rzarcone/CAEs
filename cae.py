@@ -1,5 +1,7 @@
 import matplotlib
 matplotlib.use("Agg")
+
+import os
 import tensorflow as tf
 import utils.plot_functions as pf
 import numpy as np
@@ -12,7 +14,7 @@ def preprocess_image(image):
   cropped_image = tf.to_float(cropped_image, name="ToFlaot")
   cropped_image = tf.div(cropped_image, 255.0)
   cropped_image = tf.subtract(cropped_image, tf.reduce_mean(cropped_image))
-  ## grayscale ## 
+  ## grayscale ##
   cropped_image = tf.image.rgb_to_grayscale(cropped_image)
   return cropped_image
 
@@ -85,10 +87,10 @@ def layer_maker(layer_num, u_in, w_shape, w_init, stride, decode, relu, god_damn
   with tf.variable_scope("biases"+str(layer_num)) as scope:
     if decode:
       b = tf.get_variable(name="latent_bias"+str(layer_num), dtype=tf.float32,
-        initializer=tf.zeros(w_shape[2]), trainable=True) 
+        initializer=tf.zeros(w_shape[2]), trainable=True)
     else:
       b = tf.get_variable(name="latent_bias"+str(layer_num), dtype=tf.float32,
-        initializer=tf.zeros(w_shape[3]), trainable=True) 
+        initializer=tf.zeros(w_shape[3]), trainable=True)
 
   with tf.variable_scope("hidden"+str(layer_num)) as scope:
     if decode:
@@ -152,6 +154,7 @@ def u_print(u_list):
 #general params
 file_location = "/home/dpaiton/Work/Datasets/imagenet/imgs.txt"
 gpu_ids = ["0", "1"]
+output_location = os.path.expanduser("~")+"/CAE_Project/CAEs/train/"
 num_threads = 5
 num_epochs = 1
 seed = 1234567890
@@ -183,7 +186,7 @@ mem_v_min = -1.0
 mem_v_max = 1.0
 
 #queue params
-num_gpus = len(gpu_ids) 
+num_gpus = len(gpu_ids)
 patch_size_x = patch_size_y
 w_shapes = [vals for vals in zip(patch_size_y, patch_size_x, input_channels,
   output_channels)]
@@ -236,7 +239,7 @@ with graph.as_default(),tf.device('/cpu:0'):
     # FIFO queue requires that all images have the same dtype & shape
     queue = tf.FIFOQueue(capacity, dtypes=[tf.float32], shapes=im_shape)
     # Enqueues one element at a time
-    enqueue_op = queue.enqueue(read_image(filename_queue)) 
+    enqueue_op = queue.enqueue(read_image(filename_queue))
 
   with tf.variable_scope("queue") as scope:
     # Holds a list of enqueue operations for a queue, each to be run in a thread.
@@ -296,6 +299,9 @@ with graph.as_default(),tf.device('/cpu:0'):
   avg_grads = average_gradients(gradient_list)
   with tf.variable_scope("optimizers") as scope:
     train_op = optimizer.apply_gradients(avg_grads, global_step=global_step)
+
+  with tf.name_scope("savers") as scope:
+    full_saver = tf.train.Saver(var_list=train_vars, max_to_keep=2)
 
   with tf.name_scope("performance_metrics") as scope:
     MSE = tf.reduce_mean(tf.square(tf.subtract(u_list[0],
@@ -365,5 +371,6 @@ with tf.Session(config=config, graph=graph) as sess:
         print("step %04d\treg_loss %03g\trecon_loss %g\ttotal_loss %g\tMSE %g"%(
           step, ev_reg_loss, ev_recon_loss, ev_total_loss, snr))
         #u_print(u_list)
+    full_saver.save(sess, save_path=output_location+"/checkpoints/chkpt_", global_step=global_step)
   coord.request_stop()
   coord.join(enqueue_threads)
