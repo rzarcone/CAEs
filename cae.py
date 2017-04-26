@@ -175,8 +175,8 @@ decay_rate = 0.9 # for ADADELTA
 
 #layer params
 memristorify = True
-god_damn_network = True
-relu = False
+god_damn_network = False 
+relu = True 
 input_channels = [num_colors,192,192,192]#[num_colors, 128, 128]
 output_channels = [192,192,192,192]#[128, 128, 128]
 patch_size_y = [3,3,5,5]#[9, 5, 5]
@@ -315,8 +315,9 @@ with graph.as_default(),tf.device('/cpu:0'):
     [tf.summary.histogram("u"+str(idx),u) for idx,u in enumerate(u_list)]
     [tf.summary.histogram("w"+str(idx),w) for idx,w in enumerate(w_list)]
     [tf.summary.histogram("b"+str(idx),b) for idx,b in enumerate(b_list)]
-    [tf.summary.histogram("b_gdn"+str(idx),u) for idx,u in enumerate(b_gdn_list)]
-    [tf.summary.histogram("w_gdn"+str(idx),w) for idx,w in enumerate(w_gdn_list)]
+    if god_damn_network:
+      [tf.summary.histogram("b_gdn"+str(idx),u) for idx,u in enumerate(b_gdn_list)]
+      [tf.summary.histogram("w_gdn"+str(idx),w) for idx,w in enumerate(w_gdn_list)]
     tf.summary.scalar("total_loss", total_loss)
     tf.summary.scalar("MSE", MSE)
     tf.summary.scalar("SNRdB", SNRdB)
@@ -371,6 +372,8 @@ with tf.Session(config=config, graph=graph) as sess:
         print("step %04d\treg_loss %03g\trecon_loss %g\ttotal_loss %g\tMSE %g"%(
           step, ev_reg_loss, ev_recon_loss, ev_total_loss, snr))
         #u_print(u_list)
+    if not os.path.exists(output_location+"checkpoints/"):
+      os.makedirs(output_location+"checkpoints/")
     full_saver.save(sess, save_path=output_location+"/checkpoints/chkpt_", global_step=global_step)
   coord.request_stop()
   coord.join(enqueue_threads)
