@@ -10,11 +10,11 @@ import utils.mem_utils as mem_utils
 
 """Function to preprocess a single image"""
 def preprocess_image(image):
+  # We want all images to be of the same size
   cropped_image = tf.image.resize_image_with_crop_or_pad(image, 256, 256)
   cropped_image = tf.to_float(cropped_image, name="ToFlaot")
   cropped_image = tf.div(cropped_image, 255.0)
   cropped_image = tf.subtract(cropped_image, tf.reduce_mean(cropped_image))
-  ## grayscale ##
   cropped_image = tf.image.rgb_to_grayscale(cropped_image)
   return cropped_image
 
@@ -25,7 +25,6 @@ def read_image(filename_queue):
   filename, image_file = image_reader.read(filename_queue)
   # If the image has 1 channel (grayscale) it will broadcast to 3
   image = tf.image.decode_jpeg(image_file, channels=3)
-  # We want all images to be of the same size
   cropped_image = preprocess_image(image)
   return cropped_image
 
@@ -33,7 +32,7 @@ def memristorize(u_in, memristor_std_eps):
   with tf.variable_scope("memristor_transform") as scope:
     path = 'data/Partial_Reset_PCM.pkl'
     #n_mem = tf.reduce_prod(u_out.get_shape()[1:])
-    n_mem = 49152 # 49152
+    #n_mem = 32768 # 49152 for color, 32768 for grayscale
     (vs_data, mus_data, sigs_data,
       orig_VMIN, orig_VMAX, orig_RMIN,
       orig_RMAX) = get_data.get_memristor_data(path, n_mem, num_ext=5,
@@ -151,36 +150,41 @@ def u_print(u_list):
    u_print_str+="\tu"+str(idx)+"_shape: "+str(u_shape)+"\t"+str(num_u)+"\n"
    print(u_print_str)
 
+#shitty hard coding
+n_mem = 32768 # 49152 for color, 32768 for grayscale
+
 #general params
-file_location = "/home/dpaiton/Work/Datasets/imagenet/imgs.txt"
+#file_location = "/media/tbell/datasets/natural_images.txt"
+#file_location = "/media/tbell/datasets/imagenet/imgs.txt"
+file_location = "/media/tbell/datasets/flickr_yfcc100m/flickr_images.txt"
 gpu_ids = ["0", "1"]
 output_location = os.path.expanduser("~")+"/CAE_Project/CAEs/train/"
 num_threads = 5
-num_epochs = 1
+num_epochs = 2
+epoch_size = 7e4
+eval_interval = 10
 seed = 1234567890
 
 #image params
 shuffle_inputs = True
 batch_size = 25
 img_shape_y = 256
-img_shape_x = 256
 num_colors = 1
-batches_per_epoch = 10#900 #450
 
 #learning rates
 init_learning_rate = 5e-4
-decay_steps = 1000 #0.5*batch_size*batches_per_epoch
+decay_steps = 1000 #0.5*epoch_size
 staircase = True
 decay_rate = 0.9 # for ADADELTA
 
 #layer params
 memristorify = True
-god_damn_network = False 
-relu = True 
-input_channels = [num_colors,192,192,192]#[num_colors, 128, 128]
-output_channels = [192,192,192,192]#[128, 128, 128]
-patch_size_y = [3,3,5,5]#[9, 5, 5]
-strides = [2,2,2,2]#[4, 2, 2]
+god_damn_network = True 
+relu = False 
+input_channels = [num_colors, 128, 128] #192 for color
+output_channels = [128, 128, 128]
+patch_size_y = [9, 5, 5]#[3,3,5,5]
+strides = [4, 2, 2]#[2,2,2,2]
 GAMMA = 1.0  # slope of the out of bounds cost
 mem_v_min = -1.0
 mem_v_max = 1.0
@@ -188,6 +192,8 @@ mem_v_max = 1.0
 #queue params
 num_gpus = len(gpu_ids)
 patch_size_x = patch_size_y
+effective_batch_size = num_gpus*batch_size
+batches_per_epoch = int(np.floor(epoch_size/effective_batch_size))
 w_shapes = [vals for vals in zip(patch_size_y, patch_size_x, input_channels,
   output_channels)]
 
@@ -198,8 +204,9 @@ output_channels += output_channels[::-1]
 strides += strides[::-1]
 num_layers = len(w_shapes)
 min_after_dequeue = 20
+img_shape_x = img_shape_y
 im_shape = [img_shape_y, img_shape_x, num_colors]
-num_read_threads = num_threads * num_gpus
+num_read_threads = num_threads# * num_gpus #TODO:only running on cpu - so don't mult by num_gpus?
 capacity = min_after_dequeue + (num_read_threads + 1) * batch_size
 
 graph = tf.Graph()
@@ -219,9 +226,8 @@ with graph.as_default(),tf.device('/cpu:0'):
 
   with tf.variable_scope("placeholders") as scope:
     #n_mem = tf.reduce_prod(u_in.get_shape()[1:])
-    n_mem = 49152 # 49152
-    memristor_std_eps = tf.placeholder(tf.float32, shape=(num_gpus*batch_size, n_mem))
-
+    #n_mem = 32768 # 49152 for color, 32768 for grayscale
+    memristor_std_eps = tf.placeholder(tf.float32, shape=(effective_batch_size, n_mem))
 
   with tf.variable_scope("queue") as scope:
     # Make a list of filenames. Strip removes "\n" at the end
@@ -254,7 +260,7 @@ with graph.as_default(),tf.device('/cpu:0'):
   # to items within this with statement
   with tf.variable_scope(tf.get_variable_scope()):
     for gpu_id in gpu_ids:
-      with tf.device('/gpu:'+gpu_id):
+      with tf.device("/gpu:"+gpu_id):
         with tf.name_scope("tower_"+gpu_id) as scope:
           w_list = []
           u_list = [x]
@@ -348,12 +354,12 @@ with tf.Session(config=config, graph=graph) as sess:
     enqueue_threads = qr.create_threads(sess, coord=coord, start=True)
     for i in range(batches_per_epoch):
       #n_mem_eval = sess.run(tf.to_int32(tf.size(u_list[int(num_layers/2)])/u_list[int(num_layers/2)].get_shape()[0]))
-      n_mem_eval =49152 # 49152
-      mem_std_eps = np.random.standard_normal((num_gpus*batch_size, n_mem_eval)).astype(np.float32)
+      #n_mem_eval =49152 # 49152
+      mem_std_eps = np.random.standard_normal((effective_batch_size, n_mem)).astype(np.float32)
       feed_dict={memristor_std_eps:mem_std_eps}
       sess.run(train_op, feed_dict=feed_dict)
       step = sess.run(global_step, feed_dict=feed_dict)
-      if step % 1 == 0:
+      if step % eval_interval == 0:
         ### SUMMARY ##
         summary = sess.run(merged, feed_dict=feed_dict)
         train_writer.add_summary(summary, step)
