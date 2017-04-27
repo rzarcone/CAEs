@@ -155,12 +155,12 @@ n_mem = 32768 # 49152 for color, 32768 for grayscale
 
 #general params
 #file_location = "/media/tbell/datasets/natural_images.txt"
-#file_location = "/media/tbell/datasets/imagenet/imgs.txt"
-file_location = "/media/tbell/datasets/flickr_yfcc100m/flickr_images.txt"
+file_location = "/media/tbell/datasets/imagenet/imgs.txt"
+#file_location = "/media/tbell/datasets/flickr_yfcc100m/flickr_images.txt"
 gpu_ids = ["0", "1"]
 output_location = os.path.expanduser("~")+"/CAE_Project/CAEs/train/"
 num_threads = 5
-num_epochs = 2
+num_epochs = 10 
 epoch_size = 7e4
 eval_interval = 10
 seed = 1234567890
@@ -172,7 +172,7 @@ img_shape_y = 256
 num_colors = 1
 
 #learning rates
-init_learning_rate = 5e-4
+init_learning_rate = 7.5e-4
 decay_steps = 1000 #0.5*epoch_size
 staircase = True
 decay_rate = 0.9 # for ADADELTA
@@ -310,8 +310,8 @@ with graph.as_default(),tf.device('/cpu:0'):
     full_saver = tf.train.Saver(var_list=train_vars, max_to_keep=2)
 
   with tf.name_scope("performance_metrics") as scope:
-    MSE = tf.reduce_mean(tf.square(tf.subtract(u_list[0],
-      tf.clip_by_value(u_list[-1], clip_value_min=-1.0, clip_value_max=1.0))),
+    MSE = tf.reduce_mean(tf.square(tf.subtract(tf.multiply(u_list[0],255.0),
+      tf.multiply(tf.clip_by_value(u_list[-1], clip_value_min=-1.0, clip_value_max=1.0),255.0))),
       name="mean_squared_error")
     SNRdB = tf.multiply(10.0, tf.log(tf.div(tf.square(tf.nn.moments(u_list[0], axes=[0,1,2,3])[1]), MSE)), name="recon_quality")
 
