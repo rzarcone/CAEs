@@ -154,8 +154,8 @@ def u_print(u_list):
 n_mem = 1936 #32768 #49152 for color, 32768 for grayscale
 
 #general params
-file_location = "/media/tbell/datasets/natural_images.txt"
-#file_location = "/media/tbell/datasets/imagenet/imgs.txt"
+#file_location = "/media/tbell/datasets/natural_images.txt"
+file_location = "/media/tbell/datasets/imagenet/imgs.txt"
 #file_location = "/media/tbell/datasets/flickr_yfcc100m/flickr_images.txt"
 gpu_ids = ["0", "1"]
 output_location = os.path.expanduser("~")+"/CAE_Project/CAEs/train/"
@@ -167,7 +167,7 @@ seed = 1234567890
 
 #image params
 shuffle_inputs = True
-batch_size = 3
+batch_size = 30
 img_shape_y = 256
 num_colors = 1
 
@@ -181,14 +181,25 @@ decay_rate = 0.5
 memristorify = True
 god_damn_network = True
 relu = False
+
+# Model is too big
 #input_channels = [num_colors, 32, 64, 256, 128, 64, 32]#[num_colors, 128, 128] #192 for color
 #output_channels = [32, 64, 256, 128, 64, 32, 16]#[128, 128, 128]
 #patch_size_y = [3, 3, 3, 3, 4, 5, 8]#[9, 5, 5]#[3, 3, 5, 5]
 #strides = [1,1,1,2,2,2,3]#[4, 2, 2]#[2, 2, 2, 2]
+
+# max compression
 input_channels = [num_colors, 64, 128, 128, 64]
 output_channels = [64, 128, 128, 64, 16]
 patch_size_y = [3, 3, 4, 4, 6]
 strides = [1, 2, 2, 2, 3]
+
+## min compression
+#input_channels = [num_colors, 64, 128, 128, 64]
+#output_channels = [64, 128, 128, 64, 16]
+#patch_size_y = [3, 3, 4, 4, 6]
+#strides = [1, 1, 1, 2, 3]
+
 GAMMA = 1.0  # slope of the out of bounds cost
 mem_v_min = -1.0
 mem_v_max = 1.0
@@ -207,7 +218,7 @@ input_channels += input_channels[::-1]
 output_channels += output_channels[::-1]
 strides += strides[::-1]
 num_layers = len(w_shapes)
-min_after_dequeue = 20
+min_after_dequeue = 50
 img_shape_x = img_shape_y
 im_shape = [img_shape_y, img_shape_x, num_colors]
 num_read_threads = num_threads# * num_gpus #TODO:only running on cpu - so don't mult by num_gpus?
@@ -339,7 +350,7 @@ with graph.as_default(),tf.device('/cpu:0'):
   init_op = tf.group(tf.global_variables_initializer(), tf.local_variables_initializer())
 
 config = tf.ConfigProto()
-config.gpu_options.per_process_gpu_memory_fraction=0.5
+#config.gpu_options.per_process_gpu_memory_fraction=0.5
 config.gpu_options.allow_growth = True
 config.allow_soft_placement = True
 config.log_device_placement = False # for debugging - log devices used by each variable
