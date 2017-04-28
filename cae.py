@@ -11,7 +11,7 @@ import utils.mem_utils as mem_utils
 """Function to preprocess a single image"""
 def preprocess_image(image):
   # We want all images to be of the same size
-  cropped_image = tf.image.resize_image_with_crop_or_pad(image, 256, 256)
+  cropped_image = tf.image.resize_image_with_crop_or_pad(image, img_shape_y, img_shape_x)
   cropped_image = tf.to_float(cropped_image, name="ToFlaot")
   cropped_image = tf.div(cropped_image, 255.0)
   cropped_image = tf.subtract(cropped_image, tf.reduce_mean(cropped_image))
@@ -151,40 +151,44 @@ def u_print(u_list):
    print(u_print_str)
 
 #shitty hard coding
-n_mem = 32768 # 49152 for color, 32768 for grayscale
+n_mem = 1936 #32768 #49152 for color, 32768 for grayscale
 
 #general params
-#file_location = "/media/tbell/datasets/natural_images.txt"
-file_location = "/media/tbell/datasets/imagenet/imgs.txt"
+file_location = "/media/tbell/datasets/natural_images.txt"
+#file_location = "/media/tbell/datasets/imagenet/imgs.txt"
 #file_location = "/media/tbell/datasets/flickr_yfcc100m/flickr_images.txt"
 gpu_ids = ["0", "1"]
 output_location = os.path.expanduser("~")+"/CAE_Project/CAEs/train/"
-num_threads = 5
-num_epochs = 10 
-epoch_size = 7e4
-eval_interval = 10
+num_threads = 6
+num_epochs = 50
+epoch_size = 110900
+eval_interval = 1
 seed = 1234567890
 
 #image params
 shuffle_inputs = True
-batch_size = 25
+batch_size = 3
 img_shape_y = 256
 num_colors = 1
 
 #learning rates
 init_learning_rate = 7.5e-4
-decay_steps = 1000 #0.5*epoch_size
+decay_steps = epoch_size*0.5*num_epochs #0.5*epoch_size
 staircase = True
-decay_rate = 0.9 # for ADADELTA
+decay_rate = 0.5
 
 #layer params
 memristorify = True
-god_damn_network = True 
-relu = False 
-input_channels = [num_colors, 128, 128] #192 for color
-output_channels = [128, 128, 128]
-patch_size_y = [9, 5, 5]#[3,3,5,5]
-strides = [4, 2, 2]#[2,2,2,2]
+god_damn_network = True
+relu = False
+#input_channels = [num_colors, 32, 64, 256, 128, 64, 32]#[num_colors, 128, 128] #192 for color
+#output_channels = [32, 64, 256, 128, 64, 32, 16]#[128, 128, 128]
+#patch_size_y = [3, 3, 3, 3, 4, 5, 8]#[9, 5, 5]#[3, 3, 5, 5]
+#strides = [1,1,1,2,2,2,3]#[4, 2, 2]#[2, 2, 2, 2]
+input_channels = [num_colors, 64, 128, 128, 64]
+output_channels = [64, 128, 128, 64, 16]
+patch_size_y = [3, 3, 4, 4, 6]
+strides = [1, 2, 2, 2, 3]
 GAMMA = 1.0  # slope of the out of bounds cost
 mem_v_min = -1.0
 mem_v_max = 1.0
@@ -331,12 +335,11 @@ with graph.as_default(),tf.device('/cpu:0'):
   # Must initialize local variables as well as global to init num_epochs
   # in tf.train.string_input_produce
   merged = tf.summary.merge_all()
-  train_writer = tf.summary.FileWriter("/home/rzarcone/CAE_Project/CAEs" + "/train", graph)
+  train_writer = tf.summary.FileWriter(os.path.expanduser("~")+"/CAE_Project/CAEs" + "/train", graph)
   init_op = tf.group(tf.global_variables_initializer(), tf.local_variables_initializer())
 
-#gpu_options = tf.GPUOptions(per_process_gpu_memory_fraction=0.5)
 config = tf.ConfigProto()
-#config.gpu_options.per_process_gpu_memory_fraction=0.5
+config.gpu_options.per_process_gpu_memory_fraction=0.5
 config.gpu_options.allow_growth = True
 config.allow_soft_placement = True
 config.log_device_placement = False # for debugging - log devices used by each variable
