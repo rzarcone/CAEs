@@ -161,9 +161,11 @@ gpu_ids = ["0", "1"]
 output_location = os.path.expanduser("~")+"/CAE_Project/CAEs/train/"
 num_threads = 6
 num_epochs = 50
-epoch_size = 110900
-eval_interval = 1
+epoch_size = 60000#110900
+eval_interval = 100
 seed = 1234567890
+checkpoint_path = '/home/dpaiton/CAE_Project/CAEs/train/checkpoints/chkpt_-8000' 
+run_from_check = True 
 
 #image params
 shuffle_inputs = True
@@ -172,7 +174,7 @@ img_shape_y = 256
 num_colors = 1
 
 #learning rates
-init_learning_rate = 7.5e-4
+init_learning_rate = 1.0e-4
 decay_steps = epoch_size*0.5*num_epochs #0.5*epoch_size
 staircase = True
 decay_rate = 0.5
@@ -356,6 +358,8 @@ config.allow_soft_placement = True
 config.log_device_placement = False # for debugging - log devices used by each variable
 with tf.Session(config=config, graph=graph) as sess:
   sess.run(init_op)
+  if run_from_check == True:
+    full_saver.restore(sess, checkpoint_path)
   # Coordinator manages threads, checks for stopping requests
   for n in range(num_epochs):
     coord = tf.train.Coordinator()
