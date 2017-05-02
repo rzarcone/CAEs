@@ -8,6 +8,54 @@ import numpy as np
 import utils.get_data as get_data
 import utils.mem_utils as mem_utils
 
+""" PARAMETERS """
+#shitty hard coding
+n_mem = 7680  #32768 #49152 for color, 32768 for grayscale
+
+#general params
+train_mode = True
+#file_location = "/media/tbell/datasets/natural_images.txt"
+file_location = "/media/tbell/datasets/imagenet/imgs.txt"
+#file_location = "/media/tbell/datasets/flickr_yfcc100m/flickr_images.txt"
+gpu_ids = ["0"]
+output_location = os.path.expanduser("~")+"/CAE_Project/CAEs/train_boot_from_22800/"
+weight_save_filename = output_location+"/weights/"
+num_threads = 6
+num_epochs = 50
+epoch_size = 60000#110900
+eval_interval = 10
+seed = 1234567890
+check_load_path = '/home/dpaiton/CAE_Project/CAEs/train/checkpoints/chkpt_-22800'
+run_from_check = True
+
+#image params
+shuffle_inputs = True
+batch_size = 100
+img_shape_y = 256
+num_colors = 1
+
+#learning rates
+init_learning_rate = 5.0e-4*0.9*0.9
+decay_steps = 10000#epoch_size*0.5*num_epochs #0.5*epoch_size
+staircase = True
+decay_rate = 0.9
+
+#layer params
+memristorify = True
+god_damn_network = True
+relu = False
+
+#layer dimensions
+input_channels = [num_colors, 128, 128]
+output_channels = [128, 128, 30]
+patch_size_y = [9, 5, 5]
+strides = [4, 2, 2]
+
+#memristor params
+GAMMA = 1.0  # slope of the out of bounds cost
+mem_v_min = -1.0
+mem_v_max = 1.0
+
 """Function to preprocess a single image"""
 def preprocess_image(image):
   # We want all images to be of the same size
@@ -150,62 +198,6 @@ def u_print(u_list):
    u_print_str+="\tu"+str(idx)+"_shape: "+str(u_shape)+"\t"+str(num_u)+"\n"
    print(u_print_str)
 
-#shitty hard coding
-n_mem = 1936 #32768 #49152 for color, 32768 for grayscale
-
-#general params
-#file_location = "/media/tbell/datasets/natural_images.txt"
-file_location = "/media/tbell/datasets/imagenet/imgs.txt"
-#file_location = "/media/tbell/datasets/flickr_yfcc100m/flickr_images.txt"
-gpu_ids = ["0", "1"]
-output_location = os.path.expanduser("~")+"/CAE_Project/CAEs/train/"
-num_threads = 6
-num_epochs = 50
-epoch_size = 60000#110900
-eval_interval = 100
-seed = 1234567890
-checkpoint_path = '/home/dpaiton/CAE_Project/CAEs/train/checkpoints/chkpt_-8000' 
-run_from_check = True 
-
-#image params
-shuffle_inputs = True
-batch_size = 30
-img_shape_y = 256
-num_colors = 1
-
-#learning rates
-init_learning_rate = 1.0e-4
-decay_steps = epoch_size*0.5*num_epochs #0.5*epoch_size
-staircase = True
-decay_rate = 0.5
-
-#layer params
-memristorify = True
-god_damn_network = True
-relu = False
-
-# Model is too big
-#input_channels = [num_colors, 32, 64, 256, 128, 64, 32]#[num_colors, 128, 128] #192 for color
-#output_channels = [32, 64, 256, 128, 64, 32, 16]#[128, 128, 128]
-#patch_size_y = [3, 3, 3, 3, 4, 5, 8]#[9, 5, 5]#[3, 3, 5, 5]
-#strides = [1,1,1,2,2,2,3]#[4, 2, 2]#[2, 2, 2, 2]
-
-# max compression
-input_channels = [num_colors, 64, 128, 128, 64]
-output_channels = [64, 128, 128, 64, 16]
-patch_size_y = [3, 3, 4, 4, 6]
-strides = [1, 2, 2, 2, 3]
-
-## min compression
-#input_channels = [num_colors, 64, 128, 128, 64]
-#output_channels = [64, 128, 128, 64, 16]
-#patch_size_y = [3, 3, 4, 4, 6]
-#strides = [1, 1, 1, 2, 3]
-
-GAMMA = 1.0  # slope of the out of bounds cost
-mem_v_min = -1.0
-mem_v_max = 1.0
-
 #queue params
 num_gpus = len(gpu_ids)
 patch_size_x = patch_size_y
@@ -220,184 +212,206 @@ input_channels += input_channels[::-1]
 output_channels += output_channels[::-1]
 strides += strides[::-1]
 num_layers = len(w_shapes)
-min_after_dequeue = 50
+min_after_dequeue = 20
 img_shape_x = img_shape_y
 im_shape = [img_shape_y, img_shape_x, num_colors]
 num_read_threads = num_threads# * num_gpus #TODO:only running on cpu - so don't mult by num_gpus?
-capacity = min_after_dequeue + (num_read_threads + 1) * batch_size
+capacity = min_after_dequeue + (num_read_threads + 1) * effective_batch_size
 
-graph = tf.Graph()
-with graph.as_default(),tf.device('/cpu:0'):
-  with tf.name_scope("step_counter") as scope:
-    global_step = tf.Variable(0, trainable=False, name="global_step")
+def construct_graph():
+  graph = tf.Graph()
+  with graph.as_default(),tf.device('/cpu:0'):
+    with tf.name_scope("step_counter") as scope:
+      global_step = tf.Variable(0, trainable=False, name="global_step")
 
-  with tf.variable_scope("optimizers") as scope:
-    learning_rates = tf.train.exponential_decay(
-      learning_rate=init_learning_rate,
-      global_step=global_step,
-      decay_steps=decay_steps,
-      decay_rate=decay_rate,
-      staircase=staircase,
-      name="annealing_schedule")
-    optimizer = tf.train.AdamOptimizer(learning_rates, name="grad_optimizer")
+    with tf.variable_scope("optimizers") as scope:
+      learning_rates = tf.train.exponential_decay(
+        learning_rate=init_learning_rate,
+        global_step=global_step,
+        decay_steps=decay_steps,
+        decay_rate=decay_rate,
+        staircase=staircase,
+        name="annealing_schedule")
+      optimizer = tf.train.AdamOptimizer(learning_rates, name="grad_optimizer")
 
-  with tf.variable_scope("placeholders") as scope:
-    #n_mem = tf.reduce_prod(u_in.get_shape()[1:])
-    #n_mem = 32768 # 49152 for color, 32768 for grayscale
-    memristor_std_eps = tf.placeholder(tf.float32, shape=(effective_batch_size, n_mem))
+    with tf.variable_scope("placeholders") as scope:
+      #n_mem = tf.reduce_prod(u_in.get_shape()[1:])
+      #n_mem = 32768 # 49152 for color, 32768 for grayscale
+      memristor_std_eps = tf.placeholder(tf.float32, shape=(effective_batch_size, n_mem))
 
-  with tf.variable_scope("queue") as scope:
-    # Make a list of filenames. Strip removes "\n" at the end
-    # file_location contains image locations separated by newlines (piped from ls)
-    filenames = tf.constant([string.strip()
-      for string
-      in open(file_location, "r").readlines()])
+    with tf.variable_scope("queue") as scope:
+      # Make a list of filenames. Strip removes "\n" at the end
+      # file_location contains image locations separated by newlines (piped from ls)
+      filenames = tf.constant([string.strip()
+        for string
+        in open(file_location, "r").readlines()])
 
-    # Turn list of filenames into a string producer to feed names for each thread
-    # Shuffling happens here - should be faster than shuffling after the images are loaded
-    # Capacity is the max capacity of the queue - can be adjusted as needed
-    filename_queue = tf.train.string_input_producer(filenames, num_epochs,
-      shuffle=shuffle_inputs, seed=seed, capacity=capacity)
+      # Turn list of filenames into a string producer to feed names for each thread
+      # Shuffling happens here - should be faster than shuffling after the images are loaded
+      # Capacity is the max capacity of the queue - can be adjusted as needed
+      filename_queue = tf.train.string_input_producer(filenames, num_epochs,
+        shuffle=shuffle_inputs, seed=seed, capacity=capacity)
 
-    # FIFO queue requires that all images have the same dtype & shape
-    queue = tf.FIFOQueue(capacity, dtypes=[tf.float32], shapes=im_shape)
-    # Enqueues one element at a time
-    enqueue_op = queue.enqueue(read_image(filename_queue))
+      # FIFO queue requires that all images have the same dtype & shape
+      queue = tf.FIFOQueue(capacity, dtypes=[tf.float32], shapes=im_shape)
+      # Enqueues one element at a time
+      enqueue_op = queue.enqueue(read_image(filename_queue))
 
-  with tf.variable_scope("queue") as scope:
-    # Holds a list of enqueue operations for a queue, each to be run in a thread.
-    qr = tf.train.QueueRunner(queue, [enqueue_op] * num_read_threads)
+    with tf.variable_scope("queue") as scope:
+      # Holds a list of enqueue operations for a queue, each to be run in a thread.
+      qr = tf.train.QueueRunner(queue, [enqueue_op] * num_read_threads)
 
-  with tf.variable_scope("input") as scope:
-    # Reads a batch of images from the queue
-    x = queue.dequeue_many(batch_size) # Requires that all images are the same shape
+    with tf.variable_scope("input") as scope:
+      # Reads a batch of images from the queue
+      x = queue.dequeue_many(batch_size) # Requires that all images are the same shape
 
-  gradient_list = []
-  # tf.get_variable_scope().reuse_variables() call will only apply
-  # to items within this with statement
-  with tf.variable_scope(tf.get_variable_scope()):
-    for gpu_id in gpu_ids:
-      with tf.device("/gpu:"+gpu_id):
-        with tf.name_scope("tower_"+gpu_id) as scope:
-          w_list = []
-          u_list = [x]
-          b_list = []
-          b_gdn_list = []
-          w_gdn_list = []
-          w_inits = [tf.contrib.layers.xavier_initializer_conv2d(uniform=False, seed=seed,
-            dtype=tf.float32) for _ in np.arange(num_layers/2)]
-          w_inits += w_inits # decode inits are the same as encode inits
-          for layer_idx, w_shapes_strides in enumerate(zip(w_shapes, strides)):
-            decode = False if layer_idx < num_layers/2 else True
-            w, b, u_out, b_gdn, w_gdn = layer_maker(layer_idx, u_list[layer_idx], w_shapes_strides[0],
-              w_inits[layer_idx], w_shapes_strides[1], decode, relu, god_damn_network)
-            if memristorify:
-              if layer_idx == num_layers/2-1:
-                with tf.variable_scope("loss") as scope:
-                  # Penalty for going out of bounds
-                  reg_loss = tf.reduce_mean(tf.reduce_sum(GAMMA * (tf.nn.relu(u_out- mem_v_max)
-                    + tf.nn.relu(mem_v_min - u_out)), axis=[1,2,3]))
-                memristor_std_eps_slice = tf.split(value=memristor_std_eps,
-                  num_or_size_splits=num_gpus, axis=0)[int(gpu_id)]
-                u_out = memristorize(u_out, memristor_std_eps_slice)
-            w_list.append(w)
-            u_list.append(u_out)
-            b_list.append(b)
-            b_gdn_list.append(b_gdn)
-            w_gdn_list.append(w_gdn)
+    gradient_list = []
+    # tf.get_variable_scope().reuse_variables() call will only apply
+    # to items within this with statement
+    with tf.variable_scope(tf.get_variable_scope()):
+      for gpu_id in gpu_ids:
+        with tf.device("/gpu:"+gpu_id):
+          with tf.name_scope("tower_"+gpu_id) as scope:
+            w_list = []
+            u_list = [x]
+            b_list = []
+            b_gdn_list = []
+            w_gdn_list = []
+            w_inits = [tf.contrib.layers.xavier_initializer_conv2d(uniform=False, seed=seed,
+              dtype=tf.float32) for _ in np.arange(num_layers/2)]
+            w_inits += w_inits # decode inits are the same as encode inits
+            for layer_idx, w_shapes_strides in enumerate(zip(w_shapes, strides)):
+              decode = False if layer_idx < num_layers/2 else True
+              w, b, u_out, b_gdn, w_gdn = layer_maker(layer_idx, u_list[layer_idx], w_shapes_strides[0],
+                w_inits[layer_idx], w_shapes_strides[1], decode, relu, god_damn_network)
+              if memristorify:
+                if layer_idx == num_layers/2-1:
+                  with tf.variable_scope("loss") as scope:
+                    # Penalty for going out of bounds
+                    reg_loss = tf.reduce_mean(tf.reduce_sum(GAMMA * (tf.nn.relu(u_out- mem_v_max)
+                      + tf.nn.relu(mem_v_min - u_out)), axis=[1,2,3]))
+                  memristor_std_eps_slice = tf.split(value=memristor_std_eps,
+                    num_or_size_splits=num_gpus, axis=0)[int(gpu_id)]
+                  u_out = memristorize(u_out, memristor_std_eps_slice)
+              w_list.append(w)
+              u_list.append(u_out)
+              b_list.append(b)
+              b_gdn_list.append(b_gdn)
+              w_gdn_list.append(w_gdn)
 
-          with tf.variable_scope("loss") as scope:
-            recon_loss = tf.reduce_mean(tf.reduce_sum(tf.pow(tf.subtract(u_list[0], u_list[-1]), 2.0),
-              axis=[1,2,3]))
-            total_loss = tf.add_n([recon_loss, reg_loss], name="total_loss")
+            with tf.variable_scope("loss") as scope:
+              recon_loss = tf.reduce_mean(tf.reduce_sum(tf.pow(tf.subtract(u_list[0], u_list[-1]), 2.0),
+                axis=[1,2,3]))
+              total_loss = tf.add_n([recon_loss, reg_loss], name="total_loss")
 
-          with tf.variable_scope("optimizers") as scope:
-            train_vars = w_list + b_list
-            train_vars += b_gdn_list + w_gdn_list if god_damn_network else []
-            grads_and_vars = optimizer.compute_gradients(total_loss, var_list=train_vars)
-            gradient_list.append(grads_and_vars)
+            with tf.variable_scope("optimizers") as scope:
+              train_vars = w_list + b_list
+              train_vars += b_gdn_list + w_gdn_list if god_damn_network else []
+              grads_and_vars = optimizer.compute_gradients(total_loss, var_list=train_vars)
+              gradient_list.append(grads_and_vars)
 
-          tf.get_variable_scope().reuse_variables()
+            tf.get_variable_scope().reuse_variables()
 
-  avg_grads = average_gradients(gradient_list)
-  with tf.variable_scope("optimizers") as scope:
-    train_op = optimizer.apply_gradients(avg_grads, global_step=global_step)
+    avg_grads = average_gradients(gradient_list)
+    with tf.variable_scope("optimizers") as scope:
+      train_op = optimizer.apply_gradients(avg_grads, global_step=global_step)
 
-  with tf.name_scope("savers") as scope:
-    full_saver = tf.train.Saver(var_list=train_vars, max_to_keep=2)
+    with tf.name_scope("savers") as scope:
+      full_saver = tf.train.Saver(var_list=train_vars, max_to_keep=2)
 
-  with tf.name_scope("performance_metrics") as scope:
-    MSE = tf.reduce_mean(tf.square(tf.subtract(tf.multiply(u_list[0],255.0),
-      tf.multiply(tf.clip_by_value(u_list[-1], clip_value_min=-1.0, clip_value_max=1.0),255.0))),
-      name="mean_squared_error")
-    SNRdB = tf.multiply(10.0, tf.log(tf.div(tf.square(tf.nn.moments(u_list[0], axes=[0,1,2,3])[1]), MSE)), name="recon_quality")
+    with tf.name_scope("performance_metrics") as scope:
+      MSE = tf.reduce_mean(tf.square(tf.subtract(tf.multiply(u_list[0],255.0),
+        tf.multiply(tf.clip_by_value(u_list[-1], clip_value_min=-1.0, clip_value_max=1.0),255.0))),
+        name="mean_squared_error")
+      SNRdB = tf.multiply(10.0, tf.log(tf.div(tf.square(tf.nn.moments(u_list[0], axes=[0,1,2,3])[1]), MSE)), name="recon_quality")
 
-  with tf.name_scope("summaries") as scope:
-    tf.summary.image("input", u_list[0])
-    tf.summary.image("reconstruction",u_list[-1])
-    [tf.summary.histogram("u"+str(idx),u) for idx,u in enumerate(u_list)]
-    [tf.summary.histogram("w"+str(idx),w) for idx,w in enumerate(w_list)]
-    [tf.summary.histogram("b"+str(idx),b) for idx,b in enumerate(b_list)]
-    if god_damn_network:
-      [tf.summary.histogram("b_gdn"+str(idx),u) for idx,u in enumerate(b_gdn_list)]
-      [tf.summary.histogram("w_gdn"+str(idx),w) for idx,w in enumerate(w_gdn_list)]
-    tf.summary.scalar("total_loss", total_loss)
-    tf.summary.scalar("MSE", MSE)
-    tf.summary.scalar("SNRdB", SNRdB)
+    with tf.name_scope("summaries") as scope:
+      tf.summary.image("input", u_list[0])
+      tf.summary.image("reconstruction",u_list[-1])
+      [tf.summary.histogram("u"+str(idx),u) for idx,u in enumerate(u_list)]
+      [tf.summary.histogram("w"+str(idx),w) for idx,w in enumerate(w_list)]
+      [tf.summary.histogram("b"+str(idx),b) for idx,b in enumerate(b_list)]
+      if god_damn_network:
+        [tf.summary.histogram("b_gdn"+str(idx),u) for idx,u in enumerate(b_gdn_list)]
+        [tf.summary.histogram("w_gdn"+str(idx),w) for idx,w in enumerate(w_gdn_list)]
+      tf.summary.scalar("total_loss", total_loss)
+      tf.summary.scalar("MSE", MSE)
+      tf.summary.scalar("SNRdB", SNRdB)
 
-  # Must initialize local variables as well as global to init num_epochs
-  # in tf.train.string_input_produce
-  merged = tf.summary.merge_all()
-  train_writer = tf.summary.FileWriter(os.path.expanduser("~")+"/CAE_Project/CAEs" + "/train", graph)
-  init_op = tf.group(tf.global_variables_initializer(), tf.local_variables_initializer())
+    # Must initialize local variables as well as global to init num_epochs
+    # in tf.train.string_input_produce
+    merged = tf.summary.merge_all()
+    train_writer = tf.summary.FileWriter(output_location, graph)
+    init_op = tf.group(tf.global_variables_initializer(), tf.local_variables_initializer())
+
+# Make directories
+if not os.path.exists(output_location+"checkpoints/"):
+  os.makedirs(output_location+"checkpoints/")
+if not os.path.exists(weight_save_filename):
+  os.makedirs(weight_save_filename)
 
 config = tf.ConfigProto()
 #config.gpu_options.per_process_gpu_memory_fraction=0.5
 config.gpu_options.allow_growth = True
 config.allow_soft_placement = True
 config.log_device_placement = False # for debugging - log devices used by each variable
-with tf.Session(config=config, graph=graph) as sess:
-  sess.run(init_op)
-  if run_from_check == True:
-    full_saver.restore(sess, checkpoint_path)
-  # Coordinator manages threads, checks for stopping requests
-  for n in range(num_epochs):
-    coord = tf.train.Coordinator()
-    # Both start_queue_runners and create_threads must be called to enqueue the images
-    # TODO: Why do we need to do both of these? the start=True flag on create_threads should cover
-    #        what start_queue_runners does.
-    #       Hard-coded batches_per_epoch must be less than the actual number of available batches
-    #        how to allow the queue to totally empty before refilling?
-    _ = tf.train.start_queue_runners(sess, coord, start=True)
-    enqueue_threads = qr.create_threads(sess, coord=coord, start=True)
-    for i in range(batches_per_epoch):
-      #n_mem_eval = sess.run(tf.to_int32(tf.size(u_list[int(num_layers/2)])/u_list[int(num_layers/2)].get_shape()[0]))
-      #n_mem_eval =49152 # 49152
-      mem_std_eps = np.random.standard_normal((effective_batch_size, n_mem)).astype(np.float32)
+if train_mode:
+    graph = construct_graph()
+    with tf.Session(config=config, graph=graph) as sess:
+      sess.run(init_op)
+      if run_from_check == True:
+        full_saver.restore(sess, check_load_path)
+      # Coordinator manages threads, checks for stopping requests
+      for epoch_idx in range(num_epochs):
+        coord = tf.train.Coordinator()
+        # Both start_queue_runners and create_threads must be called to enqueue the images
+        # TODO: Why do we need to do both of these? the start=True flag on create_threads should cover
+        #        what start_queue_runners does.
+        #       Hard-coded batches_per_epoch must be less than the actual number of available batches
+        #        how to allow the queue to totally empty before refilling?
+        _ = tf.train.start_queue_runners(sess, coord, start=True)
+        enqueue_threads = qr.create_threads(sess, coord=coord, start=True)
+        for i in range(batches_per_epoch):
+          #n_mem_eval = sess.run(tf.to_int32(tf.size(u_list[int(num_layers/2)])/u_list[int(num_layers/2)].get_shape()[0]))
+          #n_mem_eval =49152 # 49152
+          mem_std_eps = np.random.standard_normal((effective_batch_size, n_mem)).astype(np.float32)
+          feed_dict={memristor_std_eps:mem_std_eps}
+          sess.run(train_op, feed_dict=feed_dict)
+          step = sess.run(global_step, feed_dict=feed_dict)
+          if step % eval_interval == 0:
+            ### SUMMARY ##
+            summary = sess.run(merged, feed_dict=feed_dict)
+            train_writer.add_summary(summary, step)
+            ## Print stuff
+            [ev_reg_loss, ev_recon_loss, ev_total_loss] = sess.run([reg_loss, recon_loss, total_loss],
+              feed_dict=feed_dict)
+            snr = sess.run(MSE, feed_dict=feed_dict)
+            print("step %04d\treg_loss %03g\trecon_loss %g\ttotal_loss %g\tMSE %g"%(
+              step, ev_reg_loss, ev_recon_loss, ev_total_loss, snr))
+            #u_print(u_list)
+        full_saver.save(sess, save_path=output_location+"/checkpoints/chkpt_", global_step=global_step)
+        w_enc_eval = np.squeeze(sess.run(tf.transpose(w_list[0], perm=[3,0,1,2])))
+        pf.save_data_tiled(w_enc_eval, normalize=True, title="Weights0",
+          save_filename=weight_save_filename+"/Weights_enc_ep"+str(epoch_idx)+".png")
+        w_dec_eval = np.squeeze(sess.run(tf.transpose(w_list[-1], perm=[3,0,1,2])))
+        pf.save_data_tiled(w_dec_eval, normalize=True, title="Weights-1",
+          save_filename=weight_save_filename+"/Weights_dec_ep"+str(epoch_idx)+".png")
+      coord.request_stop()
+      coord.join(enqueue_threads)
+else:
+    batch_size = 24
+    file_location = "/media/tbell/datasets/kodak/image_list.txt"
+    graph = construct_graph()
+    with tf.Session(config=config, graph=graph) as sess:
+      sess.run(init_op)
+      assert(run_from_check)
+      full_saver.restore(ses, check_load_path)
+      # Load files
+      coord = tf.train.Coordinator()
+      _ = tf.train.start_queue_runners(sess, coord, start=True)
+      enqueue_threads = qr.create_threads(sess, coord=coord, start=True)
+      # set memristor noise
+      mem_std_eps = np.random.standard_normal((batch_size, n_mem)).astype(np.float32)
       feed_dict={memristor_std_eps:mem_std_eps}
-      sess.run(train_op, feed_dict=feed_dict)
-      step = sess.run(global_step, feed_dict=feed_dict)
-      if step % eval_interval == 0:
-        ### SUMMARY ##
-        summary = sess.run(merged, feed_dict=feed_dict)
-        train_writer.add_summary(summary, step)
-        # TODO: Verify that save_data_tiled correctly saves color weights
-        #weight_filename = "/home/rzarcone/CAE_Project/CAEs/train/weights/"
-        #w_enc_eval = np.squeeze(sess.run(tf.transpose(w_list[0], perm=[3,0,1,2])))
-        #pf.save_data_tiled(w_enc_eval, normalize=True, title="Weights0",
-        #  save_filename=weight_filename+"Weights_enc.png")
-        #w_dec_eval = np.squeeze(sess.run(tf.transpose(w_list[-1], perm=[3,0,1,2])))
-        #pf.save_data_tiled(w_dec_eval, normalize=True, title="Weights-1",
-        #  save_filename=weight_filename+"Weights_dec.png")
-        ## Print stuff
-        [ev_reg_loss, ev_recon_loss, ev_total_loss] = sess.run([reg_loss, recon_loss, total_loss],
-          feed_dict=feed_dict)
-        snr = sess.run(MSE, feed_dict=feed_dict)
-        print("step %04d\treg_loss %03g\trecon_loss %g\ttotal_loss %g\tMSE %g"%(
-          step, ev_reg_loss, ev_recon_loss, ev_total_loss, snr))
-        #u_print(u_list)
-    if not os.path.exists(output_location+"checkpoints/"):
-      os.makedirs(output_location+"checkpoints/")
-    full_saver.save(sess, save_path=output_location+"/checkpoints/chkpt_", global_step=global_step)
-  coord.request_stop()
-  coord.join(enqueue_threads)
+      tf_var_list = train_vars+u_list
+      out_vars = sess.run(tf_var_list, feed_dict=feed_dict)

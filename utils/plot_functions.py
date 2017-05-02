@@ -62,7 +62,7 @@ def save_data_tiled(data, normalize=False, title="", save_filename="",
   if len(data.shape) >= 3:
     data = pad_data(data)
   fig, sub_axis = plt.subplots(1)
-  axis_image = sub_axis.imshow(data, interpolation="nearest")
+  axis_image = sub_axis.imshow(data, cmap="Greys_r", interpolation="nearest")
   axis_image.set_clim(vmin=vmin, vmax=vmax)
   cbar = fig.colorbar(axis_image)
   sub_axis.tick_params(
