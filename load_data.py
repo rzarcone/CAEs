@@ -22,61 +22,59 @@ batch_size = 1
 num_read_threads = 1
 min_after_dequeue = 0
 seed = 1234
-capacity = 1#min_after_dequeue + (num_read_threads + 1) * batch_size
+capacity = min_after_dequeue + (num_read_threads + 1) * batch_size
+shuffle_images = False
 
-# Make a list of filenames. Strip removes '\n' at the end
-# file_location contains image locations separated by newlines (piped from ls)
 filenames = tf.constant([string.strip()
   for string
   in open(file_location, "r").readlines()])
 
-# Turn list of filenames into a string producer to feed names for each thread
-# Shuffling happens here - should be faster than shuffling after the images are loaded
-# Capacity is the max capacity of the queue - can be adjusted as needed
-#filename_queue = tf.train.string_input_producer(filenames, num_epochs, shuffle=False, seed=seed, capacity=capacity)
+## OPTION 1 - Using TF Helper Functions
+fi_queue = tf.train.string_input_producer(filenames, num_epochs=num_epochs, shuffle=shuffle_images, seed=seed, capacity=capacity)
+data_list = [read_image(fi_queue) for _ in range(num_read_threads)]
+filename_batch, image_batch = tf.train.batch_join(data_list, batch_size=batch_size, capacity=capacity, shapes=[[], [256, 256, 3]])
 
-# FIFO queue requires that all images have the same dtype & shape
-queue = tf.FIFOQueue(capacity, dtypes=[tf.string], shapes=[[]])
-# Enqueues one element at a time
-enqueue_op = queue.enqueue([read_image(filenames)])
-# Reads a batch of images from the queue
-#dequeued_filenames = queue.dequeue_many(batch_size) # Requires that all images are the same shape
-[dequeued_filenames, images]= queue.dequeue_many(batch_size)
+## OPTION 2 - Setting up Queues Manually
+# TODO: epoch control does not work...
+#from tensorflow.python.training import queue_runner
+#if shuffle_images:
+#  filenames = tf.random_shuffle(filenames, seed=seed)
+#if num_epochs > 0:
+#  epochs = tf.Variable(0, dtype=tf.int64, name="epochs", trainable=False)
+#  counter = epochs.count_up_to(num_epochs)
+#  with tf.control_dependencies([counter]):
+#    filenames = tf.identity(filenames)
+#fi_queue = tf.FIFOQueue(capacity=capacity,
+#  dtypes=[filenames.dtype.base_dtype],
+#  shapes=[filenames.get_shape()[1:].merge_with([])])
+#fi_enq_op = fi_queue.enqueue_many([filenames])
+#queue_runner.add_queue_runner(queue_runner.QueueRunner(fi_queue, [fi_enq_op]))
+#data_list = [read_image(fi_queue) for _ in range(num_read_threads)]
+#im_queue = tf.FIFOQueue(capacity=capacity, dtypes=[tf.string, tf.uint8], shapes=[[], [256, 256, 3]])
+#im_enq_ops = [im_queue.enqueue(data_item) for data_item in data_list]
+#queue_runner.add_queue_runner(queue_runner.QueueRunner(im_queue, im_enq_ops))
+#filename_batch, image_batch = im_queue.dequeue_up_to(batch_size)
 
-# Holds a list of enqueue operations for a queue, each to be run in a thread.
-qr = tf.train.QueueRunner(queue, [enqueue_op] * num_read_threads)
-
-#images = read_image(dequeued_filenames)
-
-#[dequeued_filenames, images] = read_image(filename_queue)
-
-# Must initialize local variables as well as global to init num_epochs
+# Must initialize local variables as well as global to init epoch counter
 # in tf.train.string_input_producer
 init_op = tf.group(tf.global_variables_initializer(), tf.local_variables_initializer())
 
-idx = 0
+file_idx = 0
 with tf.Session() as sess:
   sess.run(init_op)
   # Coordinator manages threads, checks for stopping requests
   coord = tf.train.Coordinator()
-  # Both start_queue_runners and create_threads must be called to enqueue the images
-  # TODO: Why do we need to do both of these? the start=True flag on create_threads should cover
-  #        what start_queue_runners does.
-  #enqueue_threads = tf.train.start_queue_runners(sess, coord=coord, start=True)
-  enqueue_threads = qr.create_threads(sess, coord=coord, start=True)
-
-  print(sess.run(filenames))
-  print("")
-  try:
-    with coord.stop_on_exception():
-      while not coord.should_stop():
-        data = sess.run(images)
-        data_name = sess.run(dequeued_filenames)
-        print(data_name)
-        print(idx)
-        idx+=1
-  except tf.errors.OutOfRangeError:
-    print ('OutofRangeError!')
-  finally:
-    coord.request_stop()
+  enqueue_threads = tf.train.start_queue_runners(sess, coord=coord, start=True)
+  file_list = sess.run(filenames)
+  print(file_list)
+  print("\n-----\n")
+  with coord.stop_on_exception():
+    while not coord.should_stop():
+      try:
+        fname, data = sess.run([filename_batch, image_batch])
+        print(str(file_idx)+" "+str(fname)+"\t"+str(data.shape)+"\n")
+        file_idx+=1
+      except tf.errors.OutOfRangeError:
+        coord.request_stop()
+  coord.request_stop()
   coord.join(enqueue_threads)
