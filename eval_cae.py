@@ -14,23 +14,27 @@ params = {}
 params["n_mem"] = 7680  #32768 #49152 for color, 32768 for grayscale
 
 #general params
-params["run_name"] = "eval_train_boot_from_22800"
+params["run_name"] = "eval_train_22800"
 params["file_location"] = "/media/tbell/datasets/kodak/image_list.txt"
 params["gpu_ids"] = ["0"]
 params["output_location"] = os.path.expanduser("~")+"/CAE_Project/CAEs/"+params["run_name"]
-params["num_threads"] = 6
+params["num_threads"] = 1
 params["num_epochs"] = 1
 params["epoch_size"] = 24
 params["eval_interval"] = 1
 params["seed"] = 1234567890
-params["check_load_path"] = "/home/dpaiton/CAE_Project/CAEs/train/checkpoints/chkpt_-22800"
+params["check_load_run_name"] = "train"
+params["check_load_path"] = "/home/dpaiton/CAE_Project/CAEs/"+params["check_load_run_name"]+"/checkpoints/chkpt_-22800"
 params["run_from_check"] = True
 
 #image params
 params["shuffle_inputs"] = False
 params["batch_size"]= 24
 params["img_shape_y"] = 256
+#params["img_shape_x"] = 256
 params["num_colors"] = 1
+params["downsample_images"] = True
+params["downsample_method"] = "crop" # can be "crop" or "resize"
 
 #learning rates
 params["init_learning_rate"] = 0.0
@@ -77,13 +81,14 @@ with tf.Session(config=config, graph=cae_model.graph) as sess:
   out_vars = sess.run(eval_list, feed_dict=feed_dict)
 
   num_img_pixels = cae_model.params["img_shape_y"]*cae_model.params["img_shape_x"]*cae_model.params["num_colors"]
-  rate = cae_model.params["n_mem"]/num_img_pixels
+  mem_per_pixel = cae_model.params["n_mem"]/num_img_pixels
   mse = out_vars[-2]
-  csv_file_loc = os.path.expanduser("~")+"/CAE_Project/CAEs/data/R_D_for_Proposed.csv"
+  csv_file_loc = os.path.expanduser("~")+"/CAE_Project/CAEs/data/r_d_proposed_"+params["check_load_run_name"]+".csv"
   with open(csv_file_loc, "w") as csv_file:
     writer = csv.writer(csv_file, dialect="excel", delimiter=",")
-    for mse_val in mse:
-      writer.writerow([rate, mse_val])
+    writer.writerow(["image_number","bits_per_pixel","mem_per_pixel","PSNR","MS-SSIM","MSE"])
+    for img_num, mse_val in enumerate(mse):
+      writer.writerow([str(img_num).zfill(2), "NA", mem_per_pixel, "NA", "NA", mse_val])
 
   coord.request_stop()
   coord.join(enqueue_threads)

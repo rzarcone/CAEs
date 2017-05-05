@@ -30,7 +30,8 @@ class cae(object):
       params["strides"] += params["strides"][::-1]
       params["num_layers"] = len(params["w_shapes"])
       params["min_after_dequeue"] = 0
-      params["img_shape_x"] = params["img_shape_y"]
+      if not hasattr(params, "img_shape_x"):
+        params["img_shape_x"] = params["img_shape_y"]
       params["im_shape"] = [params["img_shape_y"], params["img_shape_x"], params["num_colors"]]
       params["num_read_threads"] = params["num_threads"]# * params["num_gpus"] #TODO:only running on cpu - so don't mult by num_gpus?
       params["capacity"] = params["min_after_dequeue"] + (params["num_read_threads"] + 1) * params["effective_batch_size"]
@@ -68,7 +69,13 @@ class cae(object):
         image = tf.image.rgb_to_grayscale(image)
       image = tf.to_float(image)
       if self.params["downsample_images"]:
-        image = self.resize_preserving_aspect_then_crop(image)
+        if self.params["downsample_method"] == "resize":
+          image.set_shape([None, None, self.params["num_colors"]])
+          image = self.resize_preserving_aspect_then_crop(image)
+        elif self.params["downsample_method"] == "crop":
+          image = tf.image.resize_image_with_crop_or_pad(image, self.params["img_shape_y"], self.params["img_shape_x"])
+        else:
+          assert False, ("Parameter 'downsample_method' must be 'resize' or 'crop'")
       image = tf.div(image, 255.0)
       image = tf.subtract(image, tf.reduce_mean(image))
       return image
@@ -80,7 +87,6 @@ class cae(object):
       filename, image_file = image_reader.read(filename_queue)
       # If the image has 1 channel (grayscale) it will broadcast to 3
       image = tf.image.decode_image(image_file, channels=3)
-      image.set_shape([None, None, 3])
       preprocessed_image = self.preprocess_image(image)
       return [filename, preprocessed_image]
 

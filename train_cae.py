@@ -13,8 +13,6 @@ params["n_mem"] = 7680  #32768 #49152 for color, 32768 for grayscale
 #general params
 params["run_name"] = "test_model"
 params["file_location"] = "/media/tbell/datasets/natural_images.txt"
-#params["file_location"] = "/media/tbell/datasets/imagenet/imgs.txt"
-#params["file_location"] = "/media/tbell/datasets/flickr_yfcc100m/flickr_images.txt"
 params["gpu_ids"] = ["0"]
 params["output_location"] = os.path.expanduser("~")+"/CAE_Project/CAEs/"+params["run_name"]
 params["num_threads"] = 6
@@ -25,7 +23,8 @@ params["seed"] = 1234567890
 
 #checkpoint params
 params["run_from_check"] = True
-params["check_load_path"] = "/home/dpaiton/CAE_Project/CAEs/train/checkpoints/chkpt_-22800"
+params["check_load_run_name"] = "train"
+params["check_load_path"] = "/home/dpaiton/CAE_Project/CAEs/"+params["check_load_run_name"]+"/checkpoints/chkpt_-22800"
 
 #image params
 params["shuffle_inputs"] = True
@@ -33,6 +32,7 @@ params["batch_size"] = 100
 params["img_shape_y"] = 256
 params["num_colors"] = 1
 params["downsample_images"] = True
+params["downsample_method"] = "resize" # can be "crop" or "resize"
 
 #learning rates
 params["init_learning_rate"] = 5.0e-4*0.9*0.9
@@ -87,7 +87,7 @@ with tf.Session(config=config, graph=cae_model.graph) as sess:
         print("step %04d\treg_loss %03g\trecon_loss %g\ttotal_loss %g\tMSE %g"%(
           step, ev_reg_loss, ev_recon_loss, ev_total_loss, mse))
         #u_print(self.u_list)
-    cae_model.full_saver.save(sess, save_path=cae_model.params["output_location"]+"/checkpoints/chkpt_ep"+str(cae_model.params["epoch_idx"]),
+    cae_model.full_saver.save(sess, save_path=cae_model.params["output_location"]+"/checkpoints/chkpt",
       global_step=cae_model.global_step)
     w_enc_eval = np.squeeze(sess.run(tf.transpose(cae_model.w_list[0], perm=[3,0,1,2])))
     pf.save_data_tiled(w_enc_eval, normalize=True, title="Weights0",
