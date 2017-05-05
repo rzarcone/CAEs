@@ -89,9 +89,13 @@ class cae(object):
         path = self.params["memristor_PCM_data_loc"]
         #n_mem = tf.reduce_prod(u_out.get_shape()[1:])
         #n_mem = 32768 # 49152 for color, 32768 for grayscale
+        if self.params["gauss_chan"] == True:
+          get_channel_data = get_data.get_simulated_data
+        else:
+          get_channel_data = get_data.get_memristor_data
         (vs_data, mus_data, sigs_data,
           orig_VMIN, orig_VMAX, orig_RMIN,
-          orig_RMAX) = get_data.get_memristor_data(path, self.params["n_mem"], num_ext=5,
+          orig_RMAX) = get_channel_data(path, self.params["n_mem"], num_ext=5,
           norm_min=self.params["mem_v_min"], norm_max=self.params["mem_v_max"])
         v_clip = tf.clip_by_value(u_in, clip_value_min=self.params["mem_v_min"],
           clip_value_max=self.params["mem_v_max"])

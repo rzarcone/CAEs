@@ -128,7 +128,7 @@ def get_simulated_data(path, n_mem, num_ext=5, norm_min=-1., norm_max=1.):
     Vs,_ = get_raw_data(path)
     Vs = np.array(Vs)
     Vs = np.repeat(Vs,10)
-    eta = np.random.normal(0,0.0001,len(Vs))
+    eta = np.random.normal(0,0.085,len(Vs))
     Rs = Vs + eta
     
     orig_min_Vs = np.amin(Vs)

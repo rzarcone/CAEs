@@ -24,7 +24,7 @@ params["eval_interval"] = 100
 params["seed"] = 1234567890
 
 #checkpoint params
-params["run_from_check"] = True
+params["run_from_check"] = False 
 params["check_load_path"] = "/home/dpaiton/CAE_Project/CAEs/train/checkpoints/chkpt_-22800"
 
 #image params
@@ -35,7 +35,7 @@ params["num_colors"] = 1
 params["downsample_images"] = True
 
 #learning rates
-params["init_learning_rate"] = 5.0e-4*0.9*0.9
+params["init_learning_rate"] = 5.0e-4
 params["decay_steps"] = 10000#epoch_size*0.5*num_epochs #0.5*epoch_size
 params["staircase"] = True
 params["decay_rate"] = 0.9
@@ -55,6 +55,7 @@ params["strides"] = [4, 2, 2]
 params["GAMMA"] = 1.0  # slope of the out of bounds cost
 params["mem_v_min"] = -1.0
 params["mem_v_max"] = 1.0
+params["gauss_chan"] = False
 
 cae_model = cae(params)
 
