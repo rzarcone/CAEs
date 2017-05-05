@@ -11,13 +11,12 @@ params = {}
 params["n_mem"] = 7680  #32768 #49152 for color, 32768 for grayscale
 
 #general params
-params["run_name"] = "test_train_boot_from_22800"
+params["run_name"] = "test_model"
 params["file_location"] = "/media/tbell/datasets/natural_images.txt"
 #params["file_location"] = "/media/tbell/datasets/imagenet/imgs.txt"
 #params["file_location"] = "/media/tbell/datasets/flickr_yfcc100m/flickr_images.txt"
 params["gpu_ids"] = ["0"]
 params["output_location"] = os.path.expanduser("~")+"/CAE_Project/CAEs/"+params["run_name"]
-params["weight_save_filename"] = params["output_location"]+"/weights/"
 params["num_threads"] = 6
 params["num_epochs"] = 20
 params["epoch_size"] = 112682
@@ -33,6 +32,7 @@ params["shuffle_inputs"] = True
 params["batch_size"] = 100
 params["img_shape_y"] = 256
 params["num_colors"] = 1
+params["downsample_images"] = True
 
 #learning rates
 params["init_learning_rate"] = 5.0e-4*0.9*0.9

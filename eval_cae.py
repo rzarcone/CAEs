@@ -18,7 +18,6 @@ params["run_name"] = "eval_train_boot_from_22800"
 params["file_location"] = "/media/tbell/datasets/kodak/image_list.txt"
 params["gpu_ids"] = ["0"]
 params["output_location"] = os.path.expanduser("~")+"/CAE_Project/CAEs/"+params["run_name"]
-params["weight_save_filename"] = params["output_location"]+"/weights/"
 params["num_threads"] = 6
 params["num_epochs"] = 1
 params["epoch_size"] = 24
@@ -28,7 +27,7 @@ params["check_load_path"] = "/home/dpaiton/CAE_Project/CAEs/train/checkpoints/ch
 params["run_from_check"] = True
 
 #image params
-params["shuffle_inputs"] = True
+params["shuffle_inputs"] = False
 params["batch_size"]= 24
 params["img_shape_y"] = 256
 params["num_colors"] = 1

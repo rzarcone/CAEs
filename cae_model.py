@@ -13,6 +13,7 @@ class cae(object):
 
     """Adds additional parameters that can be computed from given parameters"""
     def add_params(self, params):
+      params["weight_save_filename"] = params["output_location"]+"/weights/"
       #queue params
       params["num_gpus"] = len(params["gpu_ids"])
       params["patch_size_x"] = params["patch_size_y"]
@@ -21,7 +22,7 @@ class cae(object):
       params["w_shapes"] = [vals for vals in zip(params["patch_size_y"], params["patch_size_x"],
         params["input_channels"], params["output_channels"])]
       params["memristor_PCM_data_loc"] = "data/Partial_Reset_PCM.pkl"
-      
+
       #decoding is inverse of encoding
       params["w_shapes"] += params["w_shapes"][::-1]
       params["input_channels"] += params["input_channels"][::-1]
@@ -31,7 +32,7 @@ class cae(object):
       params["min_after_dequeue"] = 0
       params["img_shape_x"] = params["img_shape_y"]
       params["im_shape"] = [params["img_shape_y"], params["img_shape_x"], params["num_colors"]]
-      params["num_read_threads"] = params["num_threads"]# * num_gpus #TODO:only running on cpu - so don't mult by num_gpus?
+      params["num_read_threads"] = params["num_threads"]# * params["num_gpus"] #TODO:only running on cpu - so don't mult by num_gpus?
       params["capacity"] = params["min_after_dequeue"] + (params["num_read_threads"] + 1) * params["effective_batch_size"]
       return params
 
@@ -42,17 +43,35 @@ class cae(object):
       if not os.path.exists(self.params["weight_save_filename"]):
         os.makedirs(self.params["weight_save_filename"])
 
-    """Function to preprocess a single image"""
+    """
+    Resize images while preserving the aspect ratio then crop them to desired shape
+    Resize is better than crop because it gets rid of possible compression artifacts in training data
+    """
+    def resize_preserving_aspect_then_crop(self, image):
+      shape = tf.shape(image)
+      orig_height = tf.to_float(shape[0])
+      orig_width = tf.to_float(shape[1])
+      orig_channels = tf.to_int32(shape[2])
+      scale = tf.cond(tf.greater(orig_height, orig_width),
+        lambda: tf.divide(self.params["img_shape_y"], orig_width),
+        lambda: tf.divide(self.params["img_shape_x"], orig_height))
+      new_height = tf.to_int32(tf.multiply(orig_height, scale))
+      new_width = tf.to_int32(tf.multiply(orig_width, scale))
+      image = tf.image.resize_images(image, [new_height, new_width], method=tf.image.ResizeMethod.BILINEAR)
+      image = tf.image.resize_image_with_crop_or_pad(image, self.params["img_shape_y"],
+        self.params["img_shape_x"])
+      return image
+    
+    """Preprocess a single image"""
     def preprocess_image(self, image):
-      # We want all images to be of the same size
-      # TODO: tf.random_crop instead?
-      cropped_image = tf.image.resize_image_with_crop_or_pad(image, self.params["img_shape_y"],
-        self.params["img_shape_x"]) 
-      cropped_image = tf.to_float(cropped_image, name="ToFlaot")
-      cropped_image = tf.div(cropped_image, 255.0)
-      cropped_image = tf.subtract(cropped_image, tf.reduce_mean(cropped_image))
-      cropped_image = tf.image.rgb_to_grayscale(cropped_image)
-      return cropped_image
+      if self.params["num_colors"] == 1:
+        image = tf.image.rgb_to_grayscale(image)
+      image = tf.to_float(image)
+      if self.params["downsample_images"]:
+        image = self.resize_preserving_aspect_then_crop(image)
+      image = tf.div(image, 255.0)
+      image = tf.subtract(image, tf.reduce_mean(image))
+      return image
 
     """Function to load in a single image"""
     def read_image(self, filename_queue):
@@ -61,8 +80,9 @@ class cae(object):
       filename, image_file = image_reader.read(filename_queue)
       # If the image has 1 channel (grayscale) it will broadcast to 3
       image = tf.image.decode_image(image_file, channels=3)
-      cropped_image = self.preprocess_image(image)
-      return [filename, cropped_image]
+      image.set_shape([None, None, 3])
+      preprocessed_image = self.preprocess_image(image)
+      return [filename, preprocessed_image]
 
     def memristorize(self, u_in, memristor_std_eps):
       with tf.variable_scope("memristor_transform") as scope:
