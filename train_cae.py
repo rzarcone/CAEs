@@ -11,18 +11,18 @@ params = {}
 params["n_mem"] = 7680  #32768 #49152 for color, 32768 for grayscale
 
 #general params
-params["run_name"] = "test_model"
+params["run_name"] = "7680_med_compress_pcm"
 params["file_location"] = "/media/tbell/datasets/natural_images.txt"
 params["gpu_ids"] = ["0"]
 params["output_location"] = os.path.expanduser("~")+"/CAE_Project/CAEs/"+params["run_name"]
 params["num_threads"] = 6
-params["num_epochs"] = 20
+params["num_epochs"] = 40
 params["epoch_size"] = 112682
 params["eval_interval"] = 100
 params["seed"] = 1234567890
 
 #checkpoint params
-params["run_from_check"] = True
+params["run_from_check"] = False
 params["check_load_run_name"] = "train"
 params["check_load_path"] = "/home/dpaiton/CAE_Project/CAEs/"+params["check_load_run_name"]+"/checkpoints/chkpt_-22800"
 
@@ -35,7 +35,7 @@ params["downsample_images"] = True
 params["downsample_method"] = "resize" # can be "crop" or "resize"
 
 #learning rates
-params["init_learning_rate"] = 5.0e-4*0.9*0.9
+params["init_learning_rate"] = 5.0e-4
 params["decay_steps"] = 10000#epoch_size*0.5*num_epochs #0.5*epoch_size
 params["staircase"] = True
 params["decay_rate"] = 0.9
@@ -55,6 +55,7 @@ params["strides"] = [4, 2, 2]
 params["GAMMA"] = 1.0  # slope of the out of bounds cost
 params["mem_v_min"] = -1.0
 params["mem_v_max"] = 1.0
+params["gauss_chan"] = False
 
 cae_model = cae(params)
 
@@ -91,9 +92,9 @@ with tf.Session(config=config, graph=cae_model.graph) as sess:
       global_step=cae_model.global_step)
     w_enc_eval = np.squeeze(sess.run(tf.transpose(cae_model.w_list[0], perm=[3,0,1,2])))
     pf.save_data_tiled(w_enc_eval, normalize=True, title="Weights0",
-      save_filename=cae_model.params["weight_save_filename"]+"/Weights_enc_ep"+str(cae_model.params["epoch_idx"])+".png")
+      save_filename=cae_model.params["weight_save_filename"]+"/Weights_enc_ep"+str(epoch_idx)+".png")
     w_dec_eval = np.squeeze(sess.run(tf.transpose(cae_model.w_list[-1], perm=[3,0,1,2])))
     pf.save_data_tiled(w_dec_eval, normalize=True, title="Weights-1",
-      save_filename=cae_model.params["weight_save_filename"]+"/Weights_dec_ep"+str(cae_model.params["epoch_idx"])+".png")
+      save_filename=cae_model.params["weight_save_filename"]+"/Weights_dec_ep"+str(epoch_idx)+".png")
   coord.request_stop()
   coord.join(enqueue_threads)
