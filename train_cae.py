@@ -11,14 +11,14 @@ params = {}
 params["n_mem"] = 7680  #32768 #49152 for color, 32768 for grayscale
 
 #general params
-params["run_name"] = "test_model"
+params["run_name"] = "7680_med_compress_pcm"
 params["file_location"] = "/media/tbell/datasets/natural_images.txt"
 #params["file_location"] = "/media/tbell/datasets/imagenet/imgs.txt"
 #params["file_location"] = "/media/tbell/datasets/flickr_yfcc100m/flickr_images.txt"
 params["gpu_ids"] = ["0"]
 params["output_location"] = os.path.expanduser("~")+"/CAE_Project/CAEs/"+params["run_name"]
 params["num_threads"] = 6
-params["num_epochs"] = 20
+params["num_epochs"] = 40
 params["epoch_size"] = 112682
 params["eval_interval"] = 100
 params["seed"] = 1234567890
@@ -88,13 +88,13 @@ with tf.Session(config=config, graph=cae_model.graph) as sess:
         print("step %04d\treg_loss %03g\trecon_loss %g\ttotal_loss %g\tMSE %g"%(
           step, ev_reg_loss, ev_recon_loss, ev_total_loss, mse))
         #u_print(self.u_list)
-    cae_model.full_saver.save(sess, save_path=cae_model.params["output_location"]+"/checkpoints/chkpt_ep"+str(cae_model.params["epoch_idx"]),
+    cae_model.full_saver.save(sess, save_path=cae_model.params["output_location"]+"/checkpoints/chkpt_ep"+str(epoch_idx),
       global_step=cae_model.global_step)
     w_enc_eval = np.squeeze(sess.run(tf.transpose(cae_model.w_list[0], perm=[3,0,1,2])))
     pf.save_data_tiled(w_enc_eval, normalize=True, title="Weights0",
-      save_filename=cae_model.params["weight_save_filename"]+"/Weights_enc_ep"+str(cae_model.params["epoch_idx"])+".png")
+      save_filename=cae_model.params["weight_save_filename"]+"/Weights_enc_ep"+str(epoch_idx)+".png")
     w_dec_eval = np.squeeze(sess.run(tf.transpose(cae_model.w_list[-1], perm=[3,0,1,2])))
     pf.save_data_tiled(w_dec_eval, normalize=True, title="Weights-1",
-      save_filename=cae_model.params["weight_save_filename"]+"/Weights_dec_ep"+str(cae_model.params["epoch_idx"])+".png")
+      save_filename=cae_model.params["weight_save_filename"]+"/Weights_dec_ep"+str(epoch_idx)+".png")
   coord.request_stop()
   coord.join(enqueue_threads)
