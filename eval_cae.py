@@ -58,7 +58,7 @@ params["relu"] = False
 
 #layer dimensions
 params["input_channels"] = [params["num_colors"], 128, 128]
-params["output_channels"] = [128, 128, 128]
+params["output_channels"] = [128, 128, 128] #12 for max, 30 for med, 128 for min
 params["patch_size_y"] = [9, 5, 5]
 params["strides"] = [4, 2, 2]
 
@@ -91,6 +91,8 @@ with tf.Session(config=config, graph=cae_model.graph) as sess:
     loss_list.append(cae_model.reg_loss)
   eval_list = tf_var_list + loss_list + [cae_model.MSE, cae_model.SNRdB]
   out_vars = sess.run(eval_list, feed_dict=feed_dict)
+
+  import IPython; IPython.embed(); raise SystemExit
 
   num_img_pixels = cae_model.params["img_shape_y"]*cae_model.params["img_shape_x"]*cae_model.params["num_colors"]
   mem_per_pixel = cae_model.params["n_mem"]/num_img_pixels
