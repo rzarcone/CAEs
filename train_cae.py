@@ -81,18 +81,12 @@ with tf.Session(config=config, graph=cae_model.graph) as sess:
       feed_dict={cae_model.memristor_std_eps:mem_std_eps}
       _, step = sess.run([cae_model.train_op, cae_model.global_step], feed_dict=feed_dict)
       if step % cae_model.params["eval_interval"] == 0:
-        loss_list = [cae_model.recon_loss, cae_model.total_loss]
-        if params["memristorify"]:
-          loss_list.append(cae_model.reg_loss)
+        loss_list = [cae_model.recon_loss, , cae_model.reg_loss, cae_model.total_loss]
         model_vars = loss_list + [cae_model.merged_summaries, cae_model.batch_MSE]
         output_list = sess.run(model_vars, feed_dict=feed_dict)
         cae_model.train_writer.add_summary(summary, step)
-        if params["memristorify"]:
-          print("step %04d\treg_loss %03g\trecon_loss %g\ttotal_loss %g\tMSE %g"%(
-            step, output_list[2], output_list[0], output_list[1], output_list[4]))
-        else:
-          print("step %04d\trecon_loss %g\ttotal_loss %g\tMSE %g"%(
-            step, output_list[0], output_list[1], output_list[3]))
+        print("step %04d\treg_loss %03g\trecon_loss %g\ttotal_loss %g\tMSE %g"%(
+          step, output_list[1], output_list[0], output_list[2], output_list[4]))
         #u_print(self.u_list)
     cae_model.full_saver.save(sess, save_path=cae_model.params["output_location"]+"/checkpoints/chkpt",
       global_step=cae_model.global_step)

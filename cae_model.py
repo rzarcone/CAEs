@@ -302,9 +302,7 @@ class cae(object):
                 with tf.variable_scope("loss") as scope:
                   self.recon_loss = tf.reduce_mean(tf.reduce_sum(tf.pow(tf.subtract(self.u_list[0],
                     self.u_list[-1]), 2.0), axis=[1,2,3]))
-                  loss_list = [self.recon_loss]
-                  if self.params["memristorify"]:
-                    loss_list.append(self.reg_loss)
+                  loss_list = [self.recon_loss, self.reg_loss]
                   self.total_loss = tf.add_n(loss_list, name="total_loss")
 
                 with tf.variable_scope("optimizers") as scope:
