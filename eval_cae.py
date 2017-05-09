@@ -11,20 +11,29 @@ from cae_model import cae
 
 params = {}
 #shitty hard coding
-params["n_mem"] = 7680  #32768 #49152 for color, 32768 for grayscale
+params["n_mem"] = 32768#3072 for max, 7680 for med, 32768 for min
+
+#checkpoints
+#params["check_load_run_name"] = "3072_max_compress_pcm" #ep49_56300
+#params["check_load_run_name"] = "3072_max_compress_pcm_relu" #ep49_56300 # GDN3 Not Found
+#params["check_load_run_name"] = "3072_max_compress_gauss" #ep49_56300
+#params["check_load_run_name"] = "7680_med_compress_pcm" #ep39_45040
+#params["check_load_run_name"] = "7680_med_compress_pcm_relu" #ep49-56300
+#params["check_load_run_name"] = "7680_med_compress_gauss" #ep49-56300
+#params["check_load_run_name"] = "32768_min_compress_gauss" #ep49-56300
+params["check_load_run_name"] = "32768_min_compress_pcm" #ep49-56300
 
 #general params
-params["run_name"] = "eval_train_22800"
+params["run_name"] = "eval_"+params["check_load_run_name"]
 params["file_location"] = "/media/tbell/datasets/kodak/image_list.txt"
-params["gpu_ids"] = ["0"]
-params["output_location"] = os.path.expanduser("~")+"/CAE_Project/CAEs/"+params["run_name"]
+params["gpu_ids"] = ["1"]
+params["output_location"] = os.path.expanduser("~")+"/CAE_Project/CAEs/model_outputs/"+params["run_name"]
 params["num_threads"] = 1
 params["num_epochs"] = 1
 params["epoch_size"] = 24
 params["eval_interval"] = 1
 params["seed"] = 1234567890
-params["check_load_run_name"] = "train"
-params["check_load_path"] = "/home/dpaiton/CAE_Project/CAEs/"+params["check_load_run_name"]+"/checkpoints/chkpt_-22800"
+params["check_load_path"] = "/home/dpaiton/CAE_Project/CAEs/model_outputs/"+params["check_load_run_name"]+"/checkpoints/chkpt_ep49-56300"
 params["run_from_check"] = True
 
 #image params
@@ -49,7 +58,7 @@ params["relu"] = False
 
 #layer dimensions
 params["input_channels"] = [params["num_colors"], 128, 128]
-params["output_channels"] = [128, 128, 30]
+params["output_channels"] = [128, 128, 128]
 params["patch_size_y"] = [9, 5, 5]
 params["strides"] = [4, 2, 2]
 
@@ -57,6 +66,7 @@ params["strides"] = [4, 2, 2]
 params["GAMMA"] = 1.0  # slope of the out of bounds cost
 params["mem_v_min"] = -1.0
 params["mem_v_max"] = 1.0
+params["gauss_chan"] = False
 
 cae_model = cae(params)
 
@@ -76,8 +86,10 @@ with tf.Session(config=config, graph=cae_model.graph) as sess:
     cae_model.params["n_mem"])).astype(np.float32)
   feed_dict={cae_model.memristor_std_eps:mem_std_eps}
   tf_var_list = cae_model.train_vars + cae_model.u_list
-  eval_list = tf_var_list + [cae_model.total_loss, cae_model.recon_loss,
-    cae_model.reg_loss, cae_model.MSE, cae_model.SNRdB]
+  loss_list = [cae_model.total_loss, cae_model.recon_loss]
+  if params["memristorify"]:
+    loss_list.append(cae_model.reg_loss)
+  eval_list = tf_var_list + loss_list + [cae_model.MSE, cae_model.SNRdB]
   out_vars = sess.run(eval_list, feed_dict=feed_dict)
 
   num_img_pixels = cae_model.params["img_shape_y"]*cae_model.params["img_shape_x"]*cae_model.params["num_colors"]

@@ -289,8 +289,9 @@ class cae(object):
                         self.reg_loss = tf.reduce_mean(tf.reduce_sum(self.params["GAMMA"]
                           * (tf.nn.relu(u_out - self.params["mem_v_max"])
                           + tf.nn.relu(self.params["mem_v_min"] - u_out)), axis=[1,2,3]))
+                      int_gpu_id = int(gpu_id) if len(self.params["gpu_ids"]) > 1 else 0
                       memristor_std_eps_slice = tf.split(value=self.memristor_std_eps,
-                        num_or_size_splits=self.params["num_gpus"], axis=0)[int(gpu_id)]
+                        num_or_size_splits=self.params["num_gpus"], axis=0)[int_gpu_id]
                       u_out = self.memristorize(u_out, memristor_std_eps_slice)
                   self.w_list.append(w)
                   self.u_list.append(u_out)
@@ -301,7 +302,10 @@ class cae(object):
                 with tf.variable_scope("loss") as scope:
                   self.recon_loss = tf.reduce_mean(tf.reduce_sum(tf.pow(tf.subtract(self.u_list[0],
                     self.u_list[-1]), 2.0), axis=[1,2,3]))
-                  self.total_loss = tf.add_n([self.recon_loss, self.reg_loss], name="total_loss")
+                  loss_list = [self.recon_loss]
+                  if self.params["memristorify"]:
+                    loss_list.append(self.reg_loss)
+                  self.total_loss = tf.add_n(loss_list, name="total_loss")
 
                 with tf.variable_scope("optimizers") as scope:
                   self.train_vars = self.w_list + self.b_list

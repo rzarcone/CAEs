@@ -14,7 +14,7 @@ params["n_mem"] = 7680  #32768 #49152 for color, 32768 for grayscale
 params["run_name"] = "7680_med_compress_pcm"
 params["file_location"] = "/media/tbell/datasets/natural_images.txt"
 params["gpu_ids"] = ["0"]
-params["output_location"] = os.path.expanduser("~")+"/CAE_Project/CAEs/"+params["run_name"]
+params["output_location"] = os.path.expanduser("~")+"/CAE_Project/CAEs/model_outputs/"+params["run_name"]
 params["num_threads"] = 6
 params["num_epochs"] = 40
 params["epoch_size"] = 112682
@@ -24,7 +24,7 @@ params["seed"] = 1234567890
 #checkpoint params
 params["run_from_check"] = False
 params["check_load_run_name"] = "train"
-params["check_load_path"] = "/home/dpaiton/CAE_Project/CAEs/"+params["check_load_run_name"]+"/checkpoints/chkpt_-22800"
+params["check_load_path"] = "/home/dpaiton/CAE_Project/CAEs/model_outputs/"+params["check_load_run_name"]+"/checkpoints/chkpt_-22800"
 
 #image params
 params["shuffle_inputs"] = True
@@ -81,12 +81,18 @@ with tf.Session(config=config, graph=cae_model.graph) as sess:
       feed_dict={cae_model.memristor_std_eps:mem_std_eps}
       _, step = sess.run([cae_model.train_op, cae_model.global_step], feed_dict=feed_dict)
       if step % cae_model.params["eval_interval"] == 0:
-        model_vars = [cae_model.merged_summaries, cae_model.reg_loss, cae_model.recon_loss, cae_model.total_loss,
-          cae_model.batch_MSE]
-        [summary, ev_reg_loss, ev_recon_loss, ev_total_loss, mse] = sess.run(model_vars, feed_dict=feed_dict)
+        loss_list = [cae_model.recon_loss, cae_model.total_loss]
+        if params["memristorify"]:
+          loss_list.append(cae_model.reg_loss)
+        model_vars = loss_list + [cae_model.merged_summaries, cae_model.batch_MSE]
+        output_list = sess.run(model_vars, feed_dict=feed_dict)
         cae_model.train_writer.add_summary(summary, step)
-        print("step %04d\treg_loss %03g\trecon_loss %g\ttotal_loss %g\tMSE %g"%(
-          step, ev_reg_loss, ev_recon_loss, ev_total_loss, mse))
+        if params["memristorify"]:
+          print("step %04d\treg_loss %03g\trecon_loss %g\ttotal_loss %g\tMSE %g"%(
+            step, output_list[2], output_list[0], output_list[1], output_list[4]))
+        else:
+          print("step %04d\trecon_loss %g\ttotal_loss %g\tMSE %g"%(
+            step, output_list[0], output_list[1], output_list[3]))
         #u_print(self.u_list)
     cae_model.full_saver.save(sess, save_path=cae_model.params["output_location"]+"/checkpoints/chkpt",
       global_step=cae_model.global_step)
