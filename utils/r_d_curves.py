@@ -3,7 +3,7 @@ import matplotlib.pyplot as plt
 import csv
 import os
 
-# csv format is rate, PSNR, rate, MSE
+# csv format is image_number, bits_per_pixel, mem_per_pixel, PSNR, MS-SSIM, MSE
 data_folder = os.path.expanduser("~")+"/CAE_Project/CAEs/data/"
 
 balle_file = data_folder+"r_d_Balle.csv"
