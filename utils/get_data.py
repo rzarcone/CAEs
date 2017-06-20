@@ -128,7 +128,7 @@ def get_simulated_data(path, n_mem, num_ext=5, norm_min=-1., norm_max=1.):
     Vs,_ = get_raw_data(path)
     Vs = np.array(Vs)
     Vs = np.repeat(Vs,10)
-    eta = np.random.normal(0,0.085,len(Vs))
+    eta = np.random.normal(0,0.3,len(Vs)) #0.085 for 2.68 bits
     Rs = Vs + eta
     
     orig_min_Vs = np.amin(Vs)
@@ -143,9 +143,9 @@ def get_simulated_data(path, n_mem, num_ext=5, norm_min=-1., norm_max=1.):
 
     mus, sigs, vs = blahut.moments(Vs,Rs)
 
-    vs = np.array([vs]*n_mem).T
-    mus = np.array([mus]*n_mem).T
-    sigs = np.array([sigs]*n_mem).T
+    vs = np.broadcast_to(vs[:,None], (vs.size, n_mem)).astype(np.float32)
+    mus = np.broadcast_to(mus[:,None], (mus.size, n_mem)).astype(np.float32)
+    sigs = np.broadcast_to(sigs[:,None], (sigs.size, n_mem)).astype(np.float32)
 
     return vs, mus, sigs, orig_min_Vs, orig_max_Vs, orig_min_Rs, orig_max_Rs
 
