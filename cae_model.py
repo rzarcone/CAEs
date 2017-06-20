@@ -311,7 +311,7 @@ class cae(object):
           self.train_op = optimizer.apply_gradients(avg_grads, global_step=self.global_step)
 
         with tf.name_scope("savers") as scope:
-          self.full_saver = tf.train.Saver(var_list=self.train_vars, max_to_keep=2)
+          self.full_saver = tf.train.Saver(var_list=self.train_vars, max_to_keep=self.params["num_epochs"])
 
         with tf.name_scope("performance_metrics") as scope:
           self.MSE = tf.reduce_mean(tf.square(tf.subtract(tf.multiply(self.u_list[0], 255.0),
