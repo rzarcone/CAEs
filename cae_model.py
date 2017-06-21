@@ -282,8 +282,9 @@ class cae(object):
                   w, b, u_out, b_gdn, w_gdn = self.layer_maker(layer_idx, self.u_list[layer_idx],
                     w_shapes_strides[0], w_inits[layer_idx], w_shapes_strides[1], decode,
                     self.params["relu"], self.params["god_damn_network"])
-                  if self.params["memristorify"]:
-                    if layer_idx == self.params["num_layers"]/2-1:
+                  if layer_idx == self.params["num_layers"]/2-1:
+                    #self.u_hist = tf.histogram(
+                    if self.params["memristorify"]:
                       with tf.variable_scope("loss") as scope:
                         # Penalty for going out of bounds
                         self.reg_loss = tf.reduce_mean(tf.reduce_sum(self.params["GAMMA"]
@@ -302,7 +303,8 @@ class cae(object):
                 with tf.variable_scope("loss") as scope:
                   self.recon_loss = tf.reduce_mean(tf.reduce_sum(tf.pow(tf.subtract(self.u_list[0],
                     self.u_list[-1]), 2.0), axis=[1,2,3]))
-                  loss_list = [self.recon_loss, self.reg_loss]
+                  loss_list = [self.recon_loss]
+                  loss_list += [self.reg_loss] if self.params["memristorify"] else []
                   self.total_loss = tf.add_n(loss_list, name="total_loss")
 
                 with tf.variable_scope("optimizers") as scope:
