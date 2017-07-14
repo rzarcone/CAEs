@@ -142,6 +142,14 @@ class cae(object):
       return u_out, b_gdn, w_gdn
 
     """
+    Estimate probability density, px, given a batch of latent vectors.
+    """
+   # def density_estimator(u_vals):
+   #   with tf.variable_scope("density_weights"):
+   #     psi = tf.get_variable(name="density_weights", shape=
+   #   return (px, psi)
+
+    """
     Make layer that does activation(conv(u,w)+b)
       where activation() is either relu or GDN
     """
@@ -266,7 +274,7 @@ class cae(object):
         # to items within this with statement
         with tf.variable_scope(tf.get_variable_scope()):
           for gpu_id in self.params["gpu_ids"]:
-            with tf.device("/gpu:"+gpu_id):
+            with tf.device("/cpu:"+gpu_id):
               with tf.name_scope("tower_"+gpu_id) as scope:
                 self.w_list = []
                 self.u_list = [self.x]
@@ -284,7 +292,8 @@ class cae(object):
                     w_shapes_strides[0], w_inits[layer_idx], w_shapes_strides[1], decode,
                     self.params["relu"], self.params["god_damn_network"])
                   if layer_idx == self.params["num_layers"]/2-1:
-                    #self.u_hist = tf.histogram(
+                   # self.px, self.psi = self.density_estimator(u_out)
+                    #self.ent_loss = stuff
                     if self.params["memristorify"]:
                       with tf.variable_scope("loss") as scope:
                         # Penalty for going out of bounds
@@ -304,7 +313,7 @@ class cae(object):
                 # latent_vals is a list of tuples containing (entropy, hist, bins)
                 latent_u = tf.reshape(self.u_list[int(self.params["num_layers"]/2)],
                     shape=(self.params["batch_size"], self.params["n_mem"]), name="latent_u")
-                #self.latent_entropies = [ef.calc_entropy(latent_u[:, u_idx], num_bins=100)
+                #self.latent_entropies = [ef.calc_entropy(latent_u[:, u_idx], num_bins=50)
                 #  for u_idx in range(self.params["n_mem"])]
                 self.latent_entropies = [ef.calc_entropy(latent_u[:, u_idx], num_bins=50)
                   for u_idx in range(2)]

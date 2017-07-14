@@ -1,11 +1,16 @@
 import tensorflow as tf
+import time as ti
 
 def get_line_eq(x_points, y_points):
+    t0 = ti.time()
     m = tf.divide(tf.subtract(y_points[1],y_points[0]), tf.subtract(x_points[1],x_points[0]))
     b = tf.subtract(y_points[1], tf.multiply(m, x_points[1]))
+    t1 = ti.time()
+    #print("get_line_eq: ",(t1-t0))
     return (m,b)
 
 def get_ms_and_bs(data):
+    t0 = ti.time()
     ms = []
     bs = []
     x0s = []
@@ -18,11 +23,14 @@ def get_ms_and_bs(data):
         bs.append(b)
         x0s.append(xy_points[0][0])
         x1s.append(xy_points[0][1])
+    t1 = ti.time()
+    #print("get_ms_and_bs: ",(t1-t0))
     return (ms, bs, x0s, x1s)
 
 def integral_end_point(x,m,b):
     # - integral_{x0,x1}(mx+b * log(mx+b))
     #  = -(2*(mx+b)^2*log(mx+b) - mx(mx+2b))/4m | {x1,x0}
+    t0 = ti.time()
     m_x = tf.multiply(m,x)
     y = tf.add(m_x,b)
     two_y_sq = tf.multiply(2.0, tf.square(y))
@@ -31,7 +39,10 @@ def integral_end_point(x,m,b):
     right_side = tf.multiply(m_x, tf.add(m_x, two_b))
     numerator = tf.multiply(-1.0, tf.subtract(left_side, right_side))
     denom = tf.multiply(4.0, m)
-    return tf.divide(numerator, denom)
+    quotient = tf.divide(numerator, denom)
+    t1 = ti.time()
+    #print("integral_end_point: ",(t1-t0)) 
+    return quotient
 
 def get_differential_entropy(x_points, y_points, m, b):
     # - integral_{x0, x1}(mx+b * log(mx+b))
@@ -49,9 +60,14 @@ def get_differential_entropy(x_points, y_points, m, b):
         def y_pos():
             return tf.subtract(integral_end_point(x_points[1],m,b),integral_end_point(x_points[0],m,b))
         return tf.cond(tf.logical_or(tf.less_equal(y_points[0],0.0),tf.less_equal(y_points[1],0.0)),y_neg,y_pos)
-    return tf.cond(tf.equal(m, 0.0), m_equal_0, m_nequal_0)
+    t0 = ti.time()
+    diff_entropy = tf.cond(tf.equal(m, 0.0), m_equal_0, m_nequal_0)
+    t1 = ti.time()
+    #print("get_differential_entropy: ", (t1-t0))
+    return diff_entropy
 
 def compute_area(ms, bs, x0s, x1s):
+    t0 = ti.time()
     total_area=tf.constant(0.0)
     for m,b,x0,x1 in zip(ms,bs,x0s,x1s):
         # area = integral(mx+b) evaluated at x1, x0
@@ -62,9 +78,12 @@ def compute_area(ms, bs, x0s, x1s):
         rigt_side = tf.multiply(b,tf.subtract(x1,x0))        
         unit_area = tf.add(left_side,rigt_side)
         total_area = tf.add(total_area,unit_area)
+    t1 = ti.time()
+    #print("compute_area: ",(t1-t0))
     return total_area
 
 def get_normalized_points(xy_points, area_total, m0, b0):
+    t0 = ti.time()
     # area_new = area_old/area_total
     # area_old = 0.5*m_old*(x1^2-x0^2) + b_old*(x1-x0)
     # b_new = area_old/(area_total*(x1-x0)) - (0.5*m_old*(x1^2-x0^2))/(x1-x0)
@@ -79,9 +98,12 @@ def get_normalized_points(xy_points, area_total, m0, b0):
     new_y0 = tf.add(tf.multiply(m0,xy_points[0][0]),new_b)
     new_y1 = tf.add(tf.multiply(m0,xy_points[0][1]),new_b)
     new_points = [[xy_points[0][0], xy_points[0][1]], [new_y0, new_y1]]
+    t1 = ti.time()
+    #print("get_normalized_points: ",(t1-t0))
     return new_points
 
 def unit_entropy(data, eps=0):
+    t0 = ti.time()
     def cond_diff_entropy(ys, m, b):
         def points_zero():
             return tf.constant(0, dtype=tf.float32)
@@ -106,15 +128,21 @@ def unit_entropy(data, eps=0):
         m = ms[idx]
         b = bs[idx]
         entropy = tf.add(entropy, cond_diff_entropy(xy_points[1], m, b))
+    t1 = ti.time()
+    #print("unit_entropy: ",(t1-t0))
     return entropy
 
 def var(xs,ys):
+    t0 = ti.time()
     mean_xs = tf.divide(tf.matmul(xs,tf.transpose(ys)),tf.size(xs))
     norm_mean = tf.square(tf.subtract(xs,mean_xs))
     var_xs = tf.matmul(norm_mean,tf.transpose(ys))
+    t1 = ti.time()
+    #print("var: "(t1-t0))
     return var_xs
 
 def calc_entropy(u_val, num_bins):
+    t0 = ti.time()
     value_range = [tf.reduce_min(u_val), tf.reduce_max(u_val)]
     hist = tf.histogram_fixed_width(u_val, value_range=value_range, nbins=num_bins)
     bin_edges = tf.linspace(start=value_range[0], stop=value_range[1], num=num_bins)
@@ -125,6 +153,6 @@ def calc_entropy(u_val, num_bins):
         y_points = [hist[index], hist[index+1]]
         hist_data.append([x_points, y_points])
     entropy = unit_entropy(hist_data, eps=1e-12)
+    t1 = ti.time()
+    #print("calc_entropy", (t1-t0))
     return (entropy, hist, bin_edges)
-
-
