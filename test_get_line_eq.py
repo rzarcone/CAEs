@@ -1,8 +1,9 @@
 import numpy as np
 import tensorflow as tf
 import time as ti
+from tensorflow.python.client import timeline
 
-device = "/gpu:0"
+device = "/cpu:0"
 
 def tf_get_line_eq(x_points, y_points):
   m = tf.divide(tf.subtract(y_points[1], y_points[0]), tf.subtract(x_points[1], x_points[0]))
@@ -33,9 +34,14 @@ config.gpu_options.allow_growth = True
 config.allow_soft_placement = True
 
 with tf.Session(config=config, graph=graph) as sess:
+    
     sess.run(tf.group(tf.global_variables_initializer(),tf.local_variables_initializer()))
+    
+    options = tf.RunOptions(trace_level=tf.RunOptions.FULL_TRACE)
+    run_metadata = tf.RunMetadata()
+    
     t0 = ti.time()
-    m,b = sess.run(line_eq, feed_dict={tf_x_points:x_points, tf_y_points:y_points})
+    m,b = sess.run(line_eq, feed_dict={tf_x_points:x_points, tf_y_points:y_points}, options=options, run_metadata=run_metadata)
     t1 = ti.time()
     tf_tot = t1-t0
     print("tf_time: ", tf_tot)
@@ -46,3 +52,9 @@ with tf.Session(config=config, graph=graph) as sess:
     np_tot = t1-t0
     print("np_time: ", np_tot)
     print("time difference (np-tf): ", np_tot-tf_tot)
+    
+    fetched_timeline = timeline.Timeline(run_metadata.step_stats)
+    chrome_trace = fetched_timeline.generate_chrome_trace_format()
+    with open('timeline_01.json', 'w') as f:
+        f.write(chrome_trace)
+    
