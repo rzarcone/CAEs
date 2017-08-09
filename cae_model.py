@@ -3,7 +3,7 @@ import numpy as np
 import os
 import utils.get_data as get_data
 import utils.mem_utils as mem_utils
-import entropy_funcs as ef
+import vect_entropy_funcs as ef
 
 class cae(object):
     def __init__(self, params):
@@ -309,14 +309,12 @@ class cae(object):
                   self.b_list.append(b)
                   self.b_gdn_list.append(b_gdn)
                   self.w_gdn_list.append(w_gdn)
-                #todo: make num_bins a param
                 # latent_vals is a list of tuples containing (entropy, hist, bins)
                 latent_u = tf.reshape(self.u_list[int(self.params["num_layers"]/2)],
                     shape=(self.params["batch_size"], self.params["n_mem"]), name="latent_u")
-                #self.latent_entropies = [ef.calc_entropy(latent_u[:, u_idx], num_bins=50)
-                #  for u_idx in range(self.params["n_mem"])]
+                #todo: make num_bins a param
                 self.latent_entropies = [ef.calc_entropy(latent_u[:, u_idx], num_bins=50)
-                  for u_idx in range(2)]
+                  for u_idx in range(10)]#self.params["n_mem"])]
 
                 with tf.variable_scope("loss") as scope:
                   self.recon_loss = tf.reduce_mean(tf.reduce_sum(tf.pow(tf.subtract(self.u_list[0],

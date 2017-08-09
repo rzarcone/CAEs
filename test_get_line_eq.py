@@ -3,7 +3,7 @@ import tensorflow as tf
 import time as ti
 from tensorflow.python.client import timeline
 
-device = "/cpu:0"
+device = "/gpu:0"
 
 def tf_get_line_eq(x_points, y_points):
   m = tf.divide(tf.subtract(y_points[1], y_points[0]), tf.subtract(x_points[1], x_points[0]))
