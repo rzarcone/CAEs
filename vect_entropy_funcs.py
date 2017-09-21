@@ -14,8 +14,8 @@ def get_line_eq(x_points, y_points):
     # y[-1] = m[-1] x[-1] + b[-1] ; y[1] = m[0]x[1]+b[0] = m[1]x[1]+b[1]
     ms = tf.divide(tf.subtract(y_points[1:], y_points[:-1]), tf.subtract(x_points[1:], x_points[:-1]))
     last_m = tf.divide(tf.subtract(y_points[-1], y_points[-2]), tf.subtract(x_points[-1], x_points[-2]))
-    ms = tf.concat([ms, tf.expand_dims(last_m, axis=0)], axis=0)
-    bs = tf.subtract(y_points, tf.multiply(ms, x_points))
+    ms = tf.concat([ms, tf.expand_dims(last_m, axis=0)], axis=0, name='ms')
+    bs = tf.subtract(y_points, tf.multiply(ms, x_points),name='bs')
     return (ms, bs)
 
 def integral_end_point(x_points, y_points, ms, bs):
@@ -33,10 +33,15 @@ def integral_end_point(x_points, y_points, ms, bs):
     """
     # - integral_{0, x0}(mx+b * log(mx+b)
     # = (mx(mx+2b) - 2*(mx+b)^2*log(mx+b))/4m | {x0}
+    ## DEBUG HACK ## 
+    # Infs are allowed in output because of tf.where() in get_differential_entropy so we're just stopping this for now
+    #Should remove this later once we actually want to calc correclty) 
+    #new_y = tf.where(tf.equal(y_points,0),tf.ones_like(y_points),y_points)
+    ############
     m_x = tf.multiply(x_points, ms)
-    left_side = tf.multiply(m_x, tf.add(m_x, tf.multiply(2.0, bs)))
-    right_side = tf.multiply(tf.multiply(2.0, tf.square(y_points)), tf.log(y_points))
-    end_points = tf.divide(tf.subtract(left_side, right_side), tf.multiply(4.0, ms))
+    left_side = tf.multiply(m_x, tf.add(m_x, tf.multiply(2.0, bs)),name='integral_left')
+    right_side = tf.multiply(tf.multiply(2.0, tf.square(y_points)), tf.log(y_points), name='integral_right')
+    end_points = tf.divide(tf.subtract(left_side, right_side), tf.multiply(4.0, ms),name='integral_end_points')
     return end_points
 
 def get_differential_entropy(x_points, y_points, ms, bs):
@@ -58,7 +63,8 @@ def get_differential_entropy(x_points, y_points, ms, bs):
     # if m=0: - integral_{x0,x1} (b*log(b)) = -(x1-x0)*(b*log(b))
     x_diffs = tf.subtract(x_points[1:], x_points[:-1])
     diff_entropy_m0 = tf.multiply(-x_diffs, tf.multiply(bs[:-1], tf.log(bs[:-1])), name="diff_entropy_m0")
-    end_points = tf.where(tf.greater(y_points,0), integral_end_point(x_points, y_points, ms, bs), tf.zeros_like(y_points))
+    end_points = tf.where(tf.greater(y_points,0), integral_end_point(x_points, y_points, ms, bs), tf.zeros_like(y_points),
+      name='cond_end_points')
     diff_entropy = tf.subtract(end_points[1:], end_points[:-1], name="diff_entropy")
     return diff_entropy, diff_entropy_m0
 
@@ -83,14 +89,14 @@ def preprocess_points(x_points, y_points):
     x_diffs = tf.subtract(x_points[1:], x_points[:-1])
     areas = tf.add(tf.multiply(0.5, tf.multiply(ms[:-1], x_sq_diffs)), tf.multiply(bs[:-1], x_diffs))
     area_total = tf.reduce_sum(areas)
-    left_side = tf.divide(areas, tf.multiply(area_total, x_diffs))
-    right_side = tf.divide(tf.multiply(tf.multiply(0.5, ms[:-1]), x_sq_diffs), x_diffs)
+    left_side = tf.divide(areas, tf.multiply(area_total, x_diffs),name='preproc_left_side')
+    right_side = tf.divide(tf.multiply(tf.multiply(0.5, ms[:-1]), x_sq_diffs), x_diffs,name='preproc_right_side')
     new_bs = tf.subtract(left_side, right_side)
-    new_bs = tf.concat([new_bs, tf.expand_dims(new_bs[-1], axis=0)], axis=0)
+    new_bs = tf.concat([new_bs, tf.expand_dims(new_bs[-1], axis=0)], axis=0,name='new_bs')
     y_points = tf.add(tf.multiply(ms, x_points), new_bs)
     ## Prevent negative Ys (weird edge case from normalizing)
     cond = tf.greater_equal(y_points, 0.0, name="neg_y_cond")
-    y_points = tf.where(cond, y_points, tf.zeros_like(y_points))
+    y_points = tf.where(cond, y_points, tf.zeros_like(y_points),name='processed_y_points')
     #x_points = tf.where(cond, x_points, tf.divide(tf.subtract(y_points, bs), ms)) #Don't actually want to mess with x
     return (x_points, y_points)
 
