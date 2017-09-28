@@ -13,9 +13,10 @@ def get_line_eq(x_points, y_points):
     # Concats add last line again, so len(ms) == len(bs) == len(xs) == len(ys)
     # y[-1] = m[-1] x[-1] + b[-1] ; y[1] = m[0]x[1]+b[0] = m[1]x[1]+b[1]
     ms = tf.divide(tf.subtract(y_points[1:], y_points[:-1]), tf.subtract(x_points[1:], x_points[:-1]))
-    last_m = tf.divide(tf.subtract(y_points[-1], y_points[-2]), tf.subtract(x_points[-1], x_points[-2]))
-    ms = tf.concat([ms, tf.expand_dims(last_m, axis=0)], axis=0, name='ms')
-    bs = tf.subtract(y_points, tf.multiply(ms, x_points),name='bs')
+    #last_m = tf.divide(tf.subtract(y_points[-1], y_points[-2]), tf.subtract(x_points[-1], x_points[-2]))
+    #ms = tf.concat([ms, tf.expand_dims(last_m, axis=0)], axis=0, name='ms')
+    ms = tf.concat([ms, tf.expand_dims(ms[-1], axis=0)], axis=0, name="ms")
+    bs = tf.subtract(y_points, tf.multiply(ms, x_points), name="bs")
     return (ms, bs)
 
 def integral_end_point(x_points, y_points, ms, bs):
@@ -33,15 +34,11 @@ def integral_end_point(x_points, y_points, ms, bs):
     """
     # - integral_{0, x0}(mx+b * log(mx+b)
     # = (mx(mx+2b) - 2*(mx+b)^2*log(mx+b))/4m | {x0}
-    ## DEBUG HACK ## 
-    # Infs are allowed in output because of tf.where() in get_differential_entropy so we're just stopping this for now
-    #Should remove this later once we actually want to calc correclty) 
-    #new_y = tf.where(tf.equal(y_points,0),tf.ones_like(y_points),y_points)
-    ############
     m_x = tf.multiply(x_points, ms)
     left_side = tf.multiply(m_x, tf.add(m_x, tf.multiply(2.0, bs)),name='integral_left')
-    right_side = tf.multiply(tf.multiply(2.0, tf.square(y_points)), tf.log(y_points), name='integral_right')
-    end_points = tf.divide(tf.subtract(left_side, right_side), tf.multiply(4.0, ms),name='integral_end_points')
+    right_side = tf.where(tf.greater(y_points,tf.zeros_like(y_points)),tf.multiply(tf.multiply(2.0, tf.square(y_points)), tf.log(y_points)), tf.zeros_like(y_points), name='integral_right')
+    end_points = tf.divide(tf.subtract(left_side, right_side), tf.multiply(4.0, ms),
+        name='integral_end_points')
     return end_points
 
 def get_differential_entropy(x_points, y_points, ms, bs):
@@ -63,8 +60,8 @@ def get_differential_entropy(x_points, y_points, ms, bs):
     # if m=0: - integral_{x0,x1} (b*log(b)) = -(x1-x0)*(b*log(b))
     x_diffs = tf.subtract(x_points[1:], x_points[:-1])
     diff_entropy_m0 = tf.multiply(-x_diffs, tf.multiply(bs[:-1], tf.log(bs[:-1])), name="diff_entropy_m0")
-    end_points = tf.where(tf.greater(y_points,0), integral_end_point(x_points, y_points, ms, bs), tf.zeros_like(y_points),
-      name='cond_end_points')
+    end_points = tf.identity(integral_end_point(x_points, y_points, ms, bs),
+      name='end_points')
     diff_entropy = tf.subtract(end_points[1:], end_points[:-1], name="diff_entropy")
     return diff_entropy, diff_entropy_m0
 
@@ -95,23 +92,25 @@ def preprocess_points(x_points, y_points):
     new_bs = tf.concat([new_bs, tf.expand_dims(new_bs[-1], axis=0)], axis=0,name='new_bs')
     y_points = tf.add(tf.multiply(ms, x_points), new_bs)
     ## Prevent negative Ys (weird edge case from normalizing)
-    cond = tf.greater_equal(y_points, 0.0, name="neg_y_cond")
+    cond = tf.greater_equal(y_points, tf.zeros_like(y_points), name="neg_y_cond")
     y_points = tf.where(cond, y_points, tf.zeros_like(y_points),name='processed_y_points')
-    #x_points = tf.where(cond, x_points, tf.divide(tf.subtract(y_points, bs), ms)) #Don't actually want to mess with x
     return (x_points, y_points)
 
-def unit_entropy(x_points, y_points, eps=1e-12):
+def unit_entropy(x_points, y_points):
     """
     Calculate individual entropy for each pair of points (i.e. each spline segment)
     Inputs:
       x_points [1D tf.tensor] of len [num_bins] containing histogram bin edges
       y_points [1D tf.tensor] of len [num_bins] containing histogram counts
-      eps [float] epsilon to avoid log(0) and divide(0) errors
     Outputs:
       unit_entropys [tf.tensor] of shape [num_bins] containing entropy for each spline segment
     """
-    x_points, y_points = preprocess_points(x_points, y_points)
-    ms, bs = get_line_eq(x_points, y_points)
+    proc_x_points, proc_y_points = preprocess_points(x_points, y_points)
+    x_points = tf.identity(proc_x_points, name="proc_x_points")
+    y_points = tf.identity(proc_y_points, name="proc_y_points")
+    proc_ms, proc_bs = get_line_eq(x_points, y_points)
+    ms = tf.identity(proc_ms, name="proc_ms")
+    bs = tf.identity(proc_bs, name="proc_bs")
     entropy, entropy_m0 = get_differential_entropy(x_points, y_points, ms, bs) 
     ms_eq_0 = tf.equal(ms[:-1], tf.zeros_like(ms[:-1]), name="ms_eq_0")
     cond1 = tf.logical_and(ms_eq_0, tf.equal(bs[:-1], tf.zeros_like(bs[:-1]), name="bs_eq_0"),
@@ -120,8 +119,15 @@ def unit_entropy(x_points, y_points, eps=1e-12):
         name="ms_eq_0_bs_neq_0")
     unit_entropies = tf.where(cond1, tf.zeros_like(entropy),
         tf.where(cond2, entropy_m0, entropy, name="ent_select_inner"), name="ent_select_final")
-    return unit_entropies, entropy_m0, entropy
+    return unit_entropies
 
+def hist_calc(u_val, num_bins):
+    value_range = [tf.reduce_min(u_val), tf.reduce_max(u_val)]
+    hist = tf.histogram_fixed_width(u_val, value_range=value_range, nbins=num_bins)
+    bin_edges = tf.linspace(start=value_range[0], stop=value_range[1], num=num_bins)
+    hist = tf.to_float(tf.divide(hist, tf.reduce_sum(hist)), name="norm_hist")
+    return bin_edges, hist
+                          
 def calc_entropy(u_val, num_bins=50):
     """
     Calculate differential entropy of input vector, u_val
@@ -132,11 +138,7 @@ def calc_entropy(u_val, num_bins=50):
     Outputs:
       entropy [float] differential entropy 
     """
-    value_range = [tf.reduce_min(u_val), tf.reduce_max(u_val)]
-    hist = tf.histogram_fixed_width(u_val, value_range=value_range, nbins=num_bins)
-    bin_edges = tf.linspace(start=value_range[0], stop=value_range[1], num=num_bins)
-    hist = tf.to_float(tf.divide(hist, tf.reduce_sum(hist)), name="norm_hist")
-    unit_entropies, entropy_m0, entropy = unit_entropy(bin_edges, hist, eps=1e-12)
+    x_points, y_points = hist_calc(u_val, num_bins)
+    unit_entropies = unit_entropy(x_points, y_points)
     entropy = tf.reduce_sum(unit_entropies, name="ent_sum")
-    #TODO: only return entropy - hist & bins is for debugging
-    return (entropy, hist, bin_edges, unit_entropies, entropy_m0)
+    return (entropy, x_points, y_points)
