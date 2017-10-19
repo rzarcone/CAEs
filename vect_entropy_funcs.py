@@ -34,11 +34,18 @@ def integral_end_point(x_points, y_points, ms, bs):
     """
     # - integral_{0, x0}(mx+b * log(mx+b)
     # = (mx(mx+2b) - 2*(mx+b)^2*log(mx+b))/4m | {x0}
+    # if m=0: - integral_{x0,x1} (b*log(b)) = -(x1-x0)*(b*log(b))
     m_x = tf.multiply(x_points, ms)
     left_side = tf.multiply(m_x, tf.add(m_x, tf.multiply(2.0, bs)),name='integral_left')
     right_side = tf.where(tf.greater(y_points,tf.zeros_like(y_points)),tf.multiply(tf.multiply(2.0, tf.square(y_points)), tf.log(y_points)), tf.zeros_like(y_points), name='integral_right')
-    end_points = tf.divide(tf.subtract(left_side, right_side), tf.multiply(4.0, ms),
-        name='integral_end_points')
+    end_points_neq_0 = tf.divide(tf.subtract(left_side, right_side), tf.multiply(4.0, ms), name='integral_end_points')
+    end_points_m0 = tf.multiply(-x_points, tf.multiply(bs,tf.log(bs)), name='integral_end_points_m0')
+    ms_eq_0 = tf.equal(ms, tf.zeros_like(ms), name = "ms_eq_0")
+    bs_eq_0 = tf.equal(bs, tf.zeros_like(bs), name = "bs_eq_0")
+    cond1 = tf.logical_and(ms_eq_0, bs_eq_0, name = "ms_and_bs_eq_0")
+    cond2 = tf.logical_and(ms_eq_0, tf.logical_not(bs_eq_0, name="bs_neq_0"), name = "ms_eq_0_bs_neq_0")
+    end_points = tf.where(cond1, tf.zeros_like(x_points),
+        tf.where(cond2, end_points_m0, end_points_neq_0, name="end_select_inner"), name="end_select_final")
     return end_points
 
 def get_differential_entropy(x_points, y_points, ms, bs):
@@ -53,17 +60,10 @@ def get_differential_entropy(x_points, y_points, ms, bs):
         The last entry is copied twice, such that bs[-2] == bs[-1]
     Outputs:
       diff_entropy [1D tf.tensor] of len [num_bins-1] giving the differential entropy (nan for m=0)
-      diff_entropy_m0 [1D tf.tensor] of len [num_bins-1] giving the entropy computed for splines with m=0
     """
-    # - integral_{x0, x1}(mx+b * log(mx+b)
-    # = (mx(mx+2b) - 2*(mx+b)^2*log(mx+b))/4m | {x1,x0}
-    # if m=0: - integral_{x0,x1} (b*log(b)) = -(x1-x0)*(b*log(b))
-    x_diffs = tf.subtract(x_points[1:], x_points[:-1])
-    diff_entropy_m0 = tf.multiply(-x_diffs, tf.multiply(bs[:-1], tf.log(bs[:-1])), name="diff_entropy_m0")
-    end_points = tf.identity(integral_end_point(x_points, y_points, ms, bs),
-      name='end_points')
+    end_points = tf.identity(integral_end_point(x_points, y_points, ms, bs), name='end_points')
     diff_entropy = tf.subtract(end_points[1:], end_points[:-1], name="diff_entropy")
-    return diff_entropy, diff_entropy_m0
+    return diff_entropy
 
 def preprocess_points(x_points, y_points):
     """
@@ -103,7 +103,7 @@ def unit_entropy(x_points, y_points):
       x_points [1D tf.tensor] of len [num_bins] containing histogram bin edges
       y_points [1D tf.tensor] of len [num_bins] containing histogram counts
     Outputs:
-      unit_entropys [tf.tensor] of shape [num_bins] containing entropy for each spline segment
+      unit_entropy [tf.tensor] of shape [num_bins] containing entropy for each spline segment
     """
     proc_x_points, proc_y_points = preprocess_points(x_points, y_points)
     x_points = tf.identity(proc_x_points, name="proc_x_points")
@@ -111,15 +111,8 @@ def unit_entropy(x_points, y_points):
     proc_ms, proc_bs = get_line_eq(x_points, y_points)
     ms = tf.identity(proc_ms, name="proc_ms")
     bs = tf.identity(proc_bs, name="proc_bs")
-    entropy, entropy_m0 = get_differential_entropy(x_points, y_points, ms, bs) 
-    ms_eq_0 = tf.equal(ms[:-1], tf.zeros_like(ms[:-1]), name="ms_eq_0")
-    cond1 = tf.logical_and(ms_eq_0, tf.equal(bs[:-1], tf.zeros_like(bs[:-1]), name="bs_eq_0"),
-        name="ms_and_bs_eq_0")
-    cond2 = tf.logical_and(ms_eq_0, tf.not_equal(bs[:-1], tf.zeros_like(bs[:-1]), name="bs_neq_0"),
-        name="ms_eq_0_bs_neq_0")
-    unit_entropies = tf.where(cond1, tf.zeros_like(entropy),
-        tf.where(cond2, entropy_m0, entropy, name="ent_select_inner"), name="ent_select_final")
-    return unit_entropies
+    unit_entropy = get_differential_entropy(x_points, y_points, ms, bs) 
+    return unit_entropy
 
 def hist_calc(u_val, num_bins):
     value_range = [tf.reduce_min(u_val), tf.reduce_max(u_val)]
