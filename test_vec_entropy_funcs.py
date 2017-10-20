@@ -43,8 +43,8 @@ class EntTest(tf.test.TestCase):
         """
         end_point = (mx(mx+2b)-2y^2log(y))/(4m)
         """
-        old_err = np.seterr(all='ignore')
-        num_runs = 50
+        old_err = np.seterr(all="ignore")
+        num_runs = 1
         for run in range(num_runs):
             print("End point test ", run, " out of ", num_runs)
             inputs = self.get_xs_ys_ms_bs()
@@ -76,7 +76,7 @@ class EntTest(tf.test.TestCase):
         _ = np.seterr(**old_err)
 
     def test_preprocess_points(self):
-        num_runs = 1
+        num_runs = 20
         for run in range(num_runs):
             print("End point test ", run, " out of ", num_runs)
             inputs = self.get_xs_ys_ms_bs()
@@ -105,12 +105,17 @@ class EntTest(tf.test.TestCase):
             inputs[1] += [rand_ys_gt]
             ## Run tests 
             for x_points, y_points, ms_gt, bs_gt, ys_gt in inputs:
+                pre_area = np.sum(0.5*ms_gt[:-1]*(x_points[1:]**2-x_points[:-1]**2)+bs_gt[:-1]*(x_points[1:]-x_points[:-1]))
+                print("Pre hist area is ", pre_area)
                 with self.test_session() as sess:
                     xs_var = tf.Variable(x_points)
                     ys_var = tf.Variable(y_points)
                     xs, ys = vf.preprocess_points(xs_var, ys_var)
+                    ms, bs = vf.get_line_eq(xs, ys)
                     tf.global_variables_initializer().run()
-                    self.assertAllClose(ys_gt,ys.eval(), rtol=1e-4)
+                    self.assertAllClose(ys_gt, ys.eval(), rtol=1e-4)
+                    post_area = np.sum(0.5*ms.eval()[:-1]*(xs.eval()[1:]**2-xs.eval()[:-1]**2) + bs.eval()[:-1] * (xs.eval()[1:]-xs.eval()[:-1]))
+                    print("Post hist area is ", post_area)
     
 if __name__ == "__main__":
     tf.test.main()
