@@ -22,7 +22,7 @@ class cae(object):
       params["batches_per_epoch"] = int(np.floor(params["epoch_size"]/params["effective_batch_size"]))
       params["w_shapes"] = [vals for vals in zip(params["patch_size_y"], params["patch_size_x"],
         params["input_channels"], params["output_channels"])]
-      params["memristor_PCM_data_loc"] = "data/Partial_Reset_PCM.pkl"
+      params["memristor_PCM_data_loc"] = "CAEs/data/Partial_Reset_PCM.pkl"
 
       #decoding is inverse of encoding
       params["w_shapes"] += params["w_shapes"][::-1]
@@ -63,7 +63,7 @@ class cae(object):
       image = tf.image.resize_image_with_crop_or_pad(image, self.params["img_shape_y"],
         self.params["img_shape_x"])
       return image
-    
+
     """Preprocess a single image"""
     def preprocess_image(self, image):
       if self.params["num_colors"] == 1:
@@ -274,7 +274,7 @@ class cae(object):
         # to items within this with statement
         with tf.variable_scope(tf.get_variable_scope()):
           for gpu_id in self.params["gpu_ids"]:
-            with tf.device("/cpu:"+gpu_id):
+            with tf.device("/gpu:"+gpu_id):
               with tf.name_scope("tower_"+gpu_id) as scope:
                 self.w_list = []
                 self.u_list = [self.x]
@@ -292,29 +292,29 @@ class cae(object):
                     w_shapes_strides[0], w_inits[layer_idx], w_shapes_strides[1], decode,
                     self.params["relu"], self.params["god_damn_network"])
                   if layer_idx == self.params["num_layers"]/2-1:
-                   # self.px, self.psi = self.density_estimator(u_out)
-                    #self.ent_loss = stuff
+                    #TODO: Entropy estimation happens at this layer
                     if self.params["memristorify"]:
                       with tf.variable_scope("loss") as scope:
                         # Penalty for going out of bounds
                         self.reg_loss = tf.reduce_mean(tf.reduce_sum(self.params["GAMMA"]
                           * (tf.nn.relu(u_out - self.params["mem_v_max"])
                           + tf.nn.relu(self.params["mem_v_min"] - u_out)), axis=[1,2,3]))
-                      int_gpu_id = int(gpu_id) if len(self.params["gpu_ids"]) > 1 else 0
+                      gpu_index = int(gpu_id) if len(self.params["gpu_ids"]) > 1 else 0
                       memristor_std_eps_slice = tf.split(value=self.memristor_std_eps,
-                        num_or_size_splits=self.params["num_gpus"], axis=0)[int_gpu_id]
+                        num_or_size_splits=self.params["num_gpus"], axis=0)[gpu_index]
                       u_out = self.memristorize(u_out, memristor_std_eps_slice)
                   self.w_list.append(w)
                   self.u_list.append(u_out)
                   self.b_list.append(b)
                   self.b_gdn_list.append(b_gdn)
                   self.w_gdn_list.append(w_gdn)
-                # latent_vals is a list of tuples containing (entropy, hist, bins)
-                latent_u = tf.reshape(self.u_list[int(self.params["num_layers"]/2)],
-                    shape=(self.params["batch_size"], self.params["n_mem"]), name="latent_u")
-                #todo: make num_bins a param
-                self.latent_entropies = [ef.calc_entropy(latent_u[:, u_idx], num_bins=50)
-                  for u_idx in range(10)]#self.params["n_mem"])]
+                # TODO: Should this be inside the layer for loop (line 295)?
+                ## latent_vals is a list of tuples containing (entropy, hist, bins)
+                #latent_u = tf.reshape(self.u_list[int(self.params["num_layers"]/2)],
+                #    shape=(self.params["batch_size"], self.params["n_mem"]), name="latent_u")
+                ##todo: make num_bins a param
+                #self.latent_entropies = [ef.calc_entropy(latent_u[:, u_idx], num_bins=50)
+                #  for u_idx in range(10)]#self.params["n_mem"])]
 
                 with tf.variable_scope("loss") as scope:
                   self.recon_loss = tf.reduce_mean(tf.reduce_sum(tf.pow(tf.subtract(self.u_list[0],
