@@ -3,7 +3,7 @@ import numpy as np
 import os
 import utils.get_data as get_data
 import utils.mem_utils as mem_utils
-import vect_entropy_funcs as ef
+import utils.entropy_funcs as ef
 
 class cae(object):
     def __init__(self, params):
@@ -229,7 +229,7 @@ class cae(object):
 
     def construct_graph(self):
       self.graph = tf.Graph()
-      with self.graph.as_default(),tf.device('/cpu:0'):
+      with self.graph.as_default(),tf.device('/gpu:0'):
         with tf.name_scope("step_counter") as scope:
           self.global_step = tf.Variable(0, trainable=False, name="global_step")
 
@@ -248,13 +248,15 @@ class cae(object):
           #n_mem = 32768 # 49152 for color, 32768 for grayscale
           self.memristor_std_eps = tf.placeholder(tf.float32,
             shape=(self.params["effective_batch_size"], self.params["n_mem"]))
+          self.triangle_centers = tf.placeholder(tf.float32, shape=[self.params["num_triangles"]], name="triangle_centers")
+          self.quantization_noise = tf.placeholder(tf.float32, shape=(self.params["effective_batch_size"],
+            self.params["n_mem"]), name="quantization_noise")
 
         with tf.variable_scope("queue") as scope:
           # Make a list of filenames. Strip removes "\n" at the end
           # file_location contains image locations separated by newlines
           filenames = tf.constant([string.strip()
-            for string
-            in open(self.params["file_location"], "r").readlines()])
+            for string in open(self.params["file_location"], "r").readlines()])
           # Turn list of filenames into a string producer to feed names for each thread
           # Shuffling happens here - should be faster than shuffling after the images are loaded
           # Capacity is the max capacity of the queue - can be adjusted as needed
@@ -281,6 +283,8 @@ class cae(object):
                 self.b_list = []
                 self.b_gdn_list = []
                 self.w_gdn_list = []
+                self.mle_weights = ef.thetas(self.params["n_mem"], self.params["num_triangles"]) 
+                self.reset_mle_weights = self.mle_weights.assign(tf.ones((self.params["n_mem"], self.params["num_triangles"])))
                 w_inits = [tf.contrib.layers.xavier_initializer_conv2d(uniform=False,
                   seed=self.params["seed"], dtype=tf.float32)
                   for _ in np.arange(self.params["num_layers"]/2)]
@@ -292,35 +296,33 @@ class cae(object):
                     w_shapes_strides[0], w_inits[layer_idx], w_shapes_strides[1], decode,
                     self.params["relu"], self.params["god_damn_network"])
                   if layer_idx == self.params["num_layers"]/2-1:
-                    #TODO: Entropy estimation happens at this layer
+                    u_resh = tf.reshape(u_out, [self.params["effective_batch_size"], self.params["n_mem"]])
+                    ll = ef.log_likelihood(u_resh, self.mle_weights, self.triangle_centers)
+                    self.mle_update = ef.mle(ll, self.mle_weights, self.params["mle_lr"])
+                    self.u_probs = ef.prob_est(u_resh, self.mle_weights, self.triangle_centers)
+                    self.latent_entropies = ef.calc_entropy(self.u_probs)
                     if self.params["memristorify"]:
-                      with tf.variable_scope("loss") as scope:
-                        # Penalty for going out of bounds
-                        self.reg_loss = tf.reduce_mean(tf.reduce_sum(self.params["GAMMA"]
-                          * (tf.nn.relu(u_out - self.params["mem_v_max"])
-                          + tf.nn.relu(self.params["mem_v_min"] - u_out)), axis=[1,2,3]))
                       gpu_index = int(gpu_id) if len(self.params["gpu_ids"]) > 1 else 0
                       memristor_std_eps_slice = tf.split(value=self.memristor_std_eps,
                         num_or_size_splits=self.params["num_gpus"], axis=0)[gpu_index]
                       u_out = self.memristorize(u_out, memristor_std_eps_slice)
+                    else: # add uniform noise if not using channels
+                      u_out = tf.reshape(tf.add(u_resh, self.quantization_noise, name="noisy_latent_u"),
+                        u_out.get_shape())
                   self.w_list.append(w)
                   self.u_list.append(u_out)
                   self.b_list.append(b)
                   self.b_gdn_list.append(b_gdn)
                   self.w_gdn_list.append(w_gdn)
-                # TODO: Should this be inside the layer for loop (line 295)?
-                ## latent_vals is a list of tuples containing (entropy, hist, bins)
-                #latent_u = tf.reshape(self.u_list[int(self.params["num_layers"]/2)],
-                #    shape=(self.params["batch_size"], self.params["n_mem"]), name="latent_u")
-                ##todo: make num_bins a param
-                #self.latent_entropies = [ef.calc_entropy(latent_u[:, u_idx], num_bins=50)
-                #  for u_idx in range(10)]#self.params["n_mem"])]
 
                 with tf.variable_scope("loss") as scope:
-                  self.recon_loss = tf.reduce_mean(tf.reduce_sum(tf.pow(tf.subtract(self.u_list[0],
-                    self.u_list[-1]), 2.0), axis=[1,2,3]))
-                  loss_list = [self.recon_loss]
-                  loss_list += [self.reg_loss] if self.params["memristorify"] else []
+                  self.recon_loss = tf.reduce_mean(tf.reduce_sum(tf.square(tf.subtract(self.u_list[0],
+                    self.u_list[-1])), axis=[1,2,3]))
+                  self.reg_loss = tf.reduce_mean(tf.reduce_sum(self.params["GAMMA"]
+                    * (tf.nn.relu(u_out - self.params["mem_v_max"])
+                    + tf.nn.relu(self.params["mem_v_min"] - u_out)), axis=[1,2,3]))
+                  self.ent_loss = self.params["LAMBDA"] * tf.reduce_sum(self.latent_entropies)
+                  loss_list = [self.recon_loss, self.reg_loss, self.ent_loss]
                   self.total_loss = tf.add_n(loss_list, name="total_loss")
 
                 with tf.variable_scope("optimizers") as scope:

@@ -82,15 +82,23 @@ def preprocess_points(x_points, y_points):
     # area_old = 0.5*m_old*(x1^2-x0^2) + b_old*(x1-x0)
     # b_new = area_old/(area_total*(x1-x0)) - (0.5*m_old*(x1^2-x0^2))/(x1-x0)
     ms, bs = get_line_eq(x_points, y_points)
-    
+
     #NP version
     #fine_xs = np.concatenate([np.arange(x_start, x_end, 1e5, dtype=np.float32) for (x_start, x_end) in zip(x_points[:-1], x_points[1:])])
     #fine_ys = [m*x+b for m in ms for x in fine_xs for b in bs]
     #fine_ys = np.divide(fine_ys, np.sum(fine_ys))
     #new_ys = fine_ys[x_points]
-    
+
     #TF Version
-    #fine_xs = 
+    #fine_vars = [(np.arange(x_start, x_end, 1e5, dtype=np.float32), ms[idx], bs[idx])
+    #    for idx, (x_start, x_end) in enumerate(zip(x_points[:-1], x_points[1:]))]
+    #fine_xs = tf.constant(np.concatenate([fine_var[0] for fine_var in fine_vars], dtype=np.float32,
+    #  name="fine_xs"))
+    #fine_ms = tf.constant(np.concatenate([fine_var[1] for fine_var in fine_vars], dtype=np.float32)
+    #fine_bs = tf.constant(np.concatenate([fine_var[2] for fine_var in fine_vars], dtype=np.float32)
+    #fine_ys = tf.add(tf.multiply(fine_ms, fine_xs), fine_bs, name="fine_ys")
+    #norm_ys = tf.divide(fine_ys, tf.reduce_sum(fine_ys, name="total_area"), name="norm_ys")
+    #new_ys = norm_ys[0:-1:1e5]
     
     x_sq_diffs = tf.subtract(tf.square(x_points[1:]), tf.square(x_points[:-1]))
     x_diffs = tf.subtract(x_points[1:], x_points[:-1])

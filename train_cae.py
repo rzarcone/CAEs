@@ -20,7 +20,7 @@ params["num_threads"] = 6
 params["num_epochs"] = 20
 #params["epoch_size"] = 112682
 params["epoch_size"] = 49900
-params["eval_interval"] = 100
+params["eval_interval"] = 1
 params["seed"] = 1234567890
 
 #checkpoint params
@@ -43,7 +43,7 @@ params["staircase"] = True
 params["decay_rate"] = 0.9
 
 #layer params
-params["memristorify"] = True
+params["memristorify"] = False
 params["god_damn_network"] = True
 params["relu"] = False
 
@@ -58,6 +58,14 @@ params["GAMMA"] = 1.0  # slope of the out of bounds cost
 params["mem_v_min"] = -1.0
 params["mem_v_max"] = 1.0
 params["gauss_chan"] = False
+
+#entropy params
+params["LAMBDA"] = 0.1
+params["num_triangles"] = 20
+params["mle_lr"] = 0.01
+params["num_mle_steps"] = 10
+params["quant_noise_scale"] = 1.0/128.0 # simulating quantizing u in {-1.0, 1.0} to uint8 (256 values)
+mle_triangle_centers = np.linspace(params["mem_v_min"], params["mem_v_max"], params["num_triangles"])
 
 cae_model = cae(params)
 
@@ -76,26 +84,28 @@ with tf.Session(config=config, graph=cae_model.graph) as sess:
   enqueue_threads = tf.train.start_queue_runners(sess, coord=coord, start=True)
   for epoch_idx in range(cae_model.params["num_epochs"]):
     for i in range(cae_model.params["batches_per_epoch"]):
-      #n_mem_eval = sess.run(tf.to_int32(tf.size(self.u_list[int(num_layers/2)])/self.u_list[int(num_layers/2)].get_shape()[0]))
-      #n_mem_eval =49152 # 49152
       mem_std_eps = np.random.standard_normal((cae_model.params["effective_batch_size"],
         cae_model.params["n_mem"])).astype(np.float32)
-      feed_dict={cae_model.memristor_std_eps:mem_std_eps}
+      feed_dict={cae_model.memristor_std_eps:mem_std_eps, cae_model.triangle_centers:mle_triangle_centers}
+      if not params["memristorify"] and not params["gauss_chan"]:
+        quant_noise = np.random.uniform(-params["quant_noise_scale"], params["quant_noise_scale"],
+          size=(cae_model.params["effective_batch_size"], cae_model.params["n_mem"]))
+        feed_dict[cae_model.quantization_noise] = quant_noise
+      # Update MLE estimate
+      for mle_step in range(params["num_mle_steps"]):
+        sess.run(cae_model.mle_update, feed_dict=feed_dict)
+      # Update network weights
       _, step = sess.run([cae_model.train_op, cae_model.global_step], feed_dict=feed_dict)
+      # Eval model
       if step % cae_model.params["eval_interval"] == 0:
-        #loss_list = [cae_model.recon_loss, cae_model.reg_loss, cae_model.total_loss]
-        #model_vars = loss_list + [cae_model.merged_summaries, cae_model.batch_MSE]
-        #output_list = sess.run(model_vars, feed_dict=feed_dict)
-        #cae_model.train_writer.add_summary(output_list[3], step)
-        #print("step %04d\treg_loss %03g\trecon_loss %g\ttotal_loss %g\tMSE %g"%(
-        #  step, output_list[1], output_list[0], output_list[2], output_list[4]))
         model_vars = [cae_model.merged_summaries, cae_model.reg_loss, cae_model.recon_loss,
-          cae_model.total_loss, cae_model.batch_MSE]
-        [summary, ev_reg_loss, ev_recon_loss, ev_total_loss, mse] = sess.run(model_vars, feed_dict)
+          cae_model.ent_loss, cae_model.total_loss, cae_model.batch_MSE]
+        [summary, ev_reg_loss, ev_recon_loss, ev_ent_loss, ev_total_loss, mse] = sess.run(model_vars, feed_dict)
         cae_model.train_writer.add_summary(summary, step)
-        print("step %04d\treg_loss %03g\trecon_loss %g\ttotal_loss %g\tMSE %g"%(
-          step, ev_reg_loss, ev_recon_loss, ev_total_loss, mse))
-        #u_print(self.u_list)
+        print("step %04d\treg_loss %03g\trecon_loss %g\tent_loss %g\ttotal_loss %g\tMSE %g"%(
+          step, ev_reg_loss, ev_recon_loss, ev_ent_loss, ev_total_loss, mse))
+        
+    #Checkpoint and save image of weights each epoch
     cae_model.full_saver.save(sess, save_path=cae_model.params["output_location"]+"/checkpoints/chkpt",
       global_step=cae_model.global_step)
     w_enc_eval = np.squeeze(sess.run(tf.transpose(cae_model.w_list[0], perm=[3,0,1,2])))

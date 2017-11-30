@@ -46,13 +46,11 @@ def build_multilayer_network(x, n_, f='tanh'):
 def normalizer_t(x,new_min,new_max):
     x_max = np.amax(x)
     x_min = np.amin(x)
-    
     return (((x-x_min)/(x_max-x_min))*(new_max-new_min)+new_min)
 
 def tensor_scaler(x,new_min,new_max):
     x_max = tf.reduce_max(x)
     x_min = tf.reduce_min(x)
-    
     return (((x-x_min)/(x_max-x_min))*(new_max-new_min)+new_min)
 
 def gauss_interp(samp, xs, ys, interp_width, ratio=0.75):
@@ -97,10 +95,7 @@ def memristor_output(v, eps, vs, mus, sigs, interp_width):
     sdev = gauss_interp(v, vs, sigs, interp_width)
     return mean + eps * sdev
 
-
-
 # Data Iteration Utils
-
 def batch_generator(data, batch_size):
     """
     data : array, shape (n_samples, ...)
