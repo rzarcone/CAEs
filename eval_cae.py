@@ -45,7 +45,7 @@ params["run_from_check"] = True
 
 #image params
 params["shuffle_inputs"] = False
-params["batch_size"]= 24
+params["batch_size"]= 100#24
 params["img_shape_y"] = 256
 #params["img_shape_x"] = 256
 params["num_colors"] = 1
@@ -96,14 +96,34 @@ with tf.Session(config=config, graph=cae_model.graph) as sess:
   tf_var_list = cae_model.train_vars + cae_model.u_list
   loss_list = [cae_model.total_loss, cae_model.reg_loss, cae_model.recon_loss]
   eval_list = tf_var_list + loss_list + [cae_model.MSE, cae_model.SNRdB]
-  out_vars = sess.run(eval_list, feed_dict=feed_dict)
+  #out_vars = sess.run(eval_list, feed_dict=feed_dict)
+  act_corrs = [None, None, None]
+  for b_idx in range(499):
+    print("Batch ",b_idx)
+    ulist = sess.run(cae_model.u_list, feed_dict)
+    for u_idx in range(3):
+      activity = ulist[u_idx]
+      (num_imgs, num_x, num_y, num_features) = activity.shape
+      for x_id in range(num_x):
+        for y_id in range(num_y):
+          act = activity[:, x_id, y_id, :]
+          cent_act = act - np.mean(act, axis=0)
+          norm_act = np.divide(cent_act, np.std(cent_act, axis=0))
+          if act_corrs[u_idx] is None:
+            act_corrs[u_idx] = np.divide(np.dot(norm_act.T, norm_act), params["batch_size"])
+          else:
+            act_corrs[u_idx] += np.divide(np.dot(norm_act.T, norm_act), params["batch_size"])
+      act_corrs[u_idx] /= num_x * num_y
+  for u_idx in range(3):
+    act_corrs[u_idx] /= 499
 
-  ulist = sess.run(cae_model.u_list, feed_dict)
-  pickle.dump(ulist, open("/home/dpaiton/CAE_Project/"+params["check_load_run_name"]+"_ulist.npz", "wb"))
+  pickle.dump(act_corrs, open("/home/dpaiton/CAE_Project/"+params["check_load_run_name"]+"_act_corrs.pkl", "wb"))
+
+  #pickle.dump(ulist, open("/home/dpaiton/CAE_Project/"+params["check_load_run_name"]+"_ulist.pkl", "wb"))
   #np.savez("/home/dpaiton/CAE_Project/"+params["check_load_run_name"]+"_ulist.npz", data=ulist)
 
-  weights = sess.run(cae_model.train_vars, feed_dict)
-  np.savez("/home/dpaiton/CAE_Project/"+params["check_load_run_name"]+"_weights.npz", data=weights)
+  #weights = sess.run(cae_model.train_vars, feed_dict)
+  #np.savez("/home/dpaiton/CAE_Project/"+params["check_load_run_name"]+"_weights.npz", data=weights)
 
   import IPython; IPython.embed(); raise SystemExit
 
