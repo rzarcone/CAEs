@@ -301,6 +301,10 @@ class cae(object):
                     self.mle_update = ef.mle(ll, self.mle_weights, self.params["mle_lr"])
                     self.u_probs = ef.prob_est(u_resh, self.mle_weights, self.triangle_centers)
                     self.latent_entropies = ef.calc_entropy(self.u_probs)
+                    with tf.variable_scope("loss") as scope:
+                      self.reg_loss = tf.reduce_mean(tf.reduce_sum(self.params["GAMMA"]
+                        * (tf.nn.relu(u_out - self.params["mem_v_max"])
+                        + tf.nn.relu(self.params["mem_v_min"] - u_out)), axis=[1,2,3]))
                     if self.params["memristorify"]:
                       gpu_index = int(gpu_id) if len(self.params["gpu_ids"]) > 1 else 0
                       memristor_std_eps_slice = tf.split(value=self.memristor_std_eps,
@@ -318,9 +322,6 @@ class cae(object):
                 with tf.variable_scope("loss") as scope:
                   self.recon_loss = tf.reduce_mean(tf.reduce_sum(tf.square(tf.subtract(self.u_list[0],
                     self.u_list[-1])), axis=[1,2,3]))
-                  self.reg_loss = tf.reduce_mean(tf.reduce_sum(self.params["GAMMA"]
-                    * (tf.nn.relu(u_out - self.params["mem_v_max"])
-                    + tf.nn.relu(self.params["mem_v_min"] - u_out)), axis=[1,2,3]))
                   self.ent_loss = self.params["LAMBDA"] * tf.reduce_sum(self.latent_entropies)
                   loss_list = [self.recon_loss, self.reg_loss, self.ent_loss]
                   self.total_loss = tf.add_n(loss_list, name="total_loss")
