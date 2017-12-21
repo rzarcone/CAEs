@@ -298,7 +298,7 @@ class cae(object):
                   if layer_idx == self.params["num_layers"]/2-1:
                     u_resh = tf.reshape(u_out, [self.params["effective_batch_size"], self.params["n_mem"]])
                     ll = ef.log_likelihood(u_resh, self.mle_thetas, self.triangle_centers)
-                    self.mle_update, self.mle_grads = ef.mle(ll, self.mle_thetas, self.params["mle_lr"])
+                    self.mle_update = ef.mle(ll, self.mle_thetas, self.params["mle_lr"])
                     self.u_probs = ef.prob_est(u_resh, self.mle_thetas, self.triangle_centers)
                     self.latent_entropies = ef.calc_entropy(self.u_probs)
                     with tf.variable_scope("loss") as scope:

@@ -67,7 +67,7 @@ def log_likelihood(latent_vals, thetas, tri_locs):
 
 def mle(log_likelihood, thetas, learning_rate):
     grads = tf.gradients(log_likelihood, thetas)[0]
-    return (thetas.assign_add(tf.multiply(tf.constant(learning_rate), grads)), grads)
+    return thetas.assign_add(tf.multiply(tf.constant(learning_rate), grads))
 
 def calc_entropy(probs):
     """
