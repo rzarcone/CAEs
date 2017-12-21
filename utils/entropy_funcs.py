@@ -1,7 +1,9 @@
 import tensorflow as tf
 
 def thetas(num_latent, num_tri):
-    return tf.Variable(tf.ones((num_latent, num_tri)), name="thetas")
+    theta_init = tf.truncated_normal((num_latent, num_tri), mean=1.0, stddev=0.1,
+      dtype=tf.float32, name="theta_init")
+    return tf.Variable(theta_init, name="thetas")
 
 def weights(thetas):
     return tf.exp(thetas)
@@ -29,9 +31,9 @@ def eval_triangle(x, h, n):
     Output:
         y [num_batch, num_latent, num_tri] evaluated triangles
     """
-    h = tf.expand_dims(h, axis=0)
-    x = tf.expand_dims(x, axis=-1)
-    n = tf.expand_dims(tf.expand_dims(n, axis=0), axis=0)
+    x = tf.expand_dims(x, axis=-1) # [num_batch, num_latent, 1]
+    h = tf.expand_dims(h, axis=0) # [1, num_latent, num_tri]
+    n = tf.expand_dims(tf.expand_dims(n, axis=0), axis=0) # [1, 1, num_tri]
     y = tf.nn.relu(tf.subtract(h, tf.abs(tf.subtract(x, n,
       name="n_sub"), name="abs_shifted"), name="h_sub"), name="tri_out")
     return y
@@ -59,11 +61,13 @@ def log_likelihood(latent_vals, thetas, tri_locs):
         log_likelihood [num_latent]
     """
     probs = prob_est(latent_vals, weights(thetas), tri_locs) # [num_batch, num_latent]
-    return tf.reduce_sum(tf.log(probs, name="log_probs"), axis=[0], name="log_likelihood")
+    logprobs = tf.log(probs, name="log_probs")
+    logprobs_zero = tf.where(tf.less_equal(probs, tf.zeros_like(probs)), tf.zeros_like(logprobs), logprobs, name="logprob_where")
+    return tf.reduce_sum(logprobs_zero, axis=[0], name="log_likelihood")
 
 def mle(log_likelihood, thetas, learning_rate):
     grads = tf.gradients(log_likelihood, thetas)[0]
-    return thetas.assign_add(tf.multiply(tf.constant(learning_rate), grads))
+    return (thetas.assign_add(tf.multiply(tf.constant(learning_rate), grads)), grads)
 
 def calc_entropy(probs):
     """
@@ -73,5 +77,5 @@ def calc_entropy(probs):
         entropy [num_latent]
     """
     plogp = tf.multiply(probs, tf.log(probs), name="plogp")
-    plogp_zeros = tf.where(tf.less_equal(probs, tf.zeros_like(probs)), tf.zeros_like(plogp), plogp, name="plogp_select")
+    plogp_zeros = tf.where(tf.less_equal(probs, tf.zeros_like(probs)), tf.zeros_like(plogp), plogp, name="plogp_where")
     return -tf.reduce_sum(plogp_zeros, axis=[0], name="entropy")

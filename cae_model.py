@@ -283,7 +283,7 @@ class cae(object):
                 self.b_list = []
                 self.b_gdn_list = []
                 self.w_gdn_list = []
-                self.mle_thetas = ef.thetas(self.params["n_mem"], self.params["num_triangles"]) 
+                self.mle_thetas = ef.thetas(self.params["n_mem"], self.params["num_triangles"])
                 self.reset_mle_thetas = self.mle_thetas.assign(tf.ones((self.params["n_mem"], self.params["num_triangles"])))
                 w_inits = [tf.contrib.layers.xavier_initializer_conv2d(uniform=False,
                   seed=self.params["seed"], dtype=tf.float32)
@@ -298,7 +298,7 @@ class cae(object):
                   if layer_idx == self.params["num_layers"]/2-1:
                     u_resh = tf.reshape(u_out, [self.params["effective_batch_size"], self.params["n_mem"]])
                     ll = ef.log_likelihood(u_resh, self.mle_thetas, self.triangle_centers)
-                    self.mle_update = ef.mle(ll, self.mle_thetas, self.params["mle_lr"])
+                    self.mle_update, self.mle_grads = ef.mle(ll, self.mle_thetas, self.params["mle_lr"])
                     self.u_probs = ef.prob_est(u_resh, self.mle_thetas, self.triangle_centers)
                     self.latent_entropies = ef.calc_entropy(self.u_probs)
                     with tf.variable_scope("loss") as scope:
