@@ -268,7 +268,7 @@ class cae(object):
             for _ in range(self.params["num_read_threads"])]
           # Batch join queues up images and delivers them a batch at a time
           filename_batch, self.x  = tf.train.batch_join(fi_queue_threads,
-            batch_size=self.params["batch_size"], capacity=self.params["capacity"], shapes=[[],
+            batch_size=self.params["effective_batch_size"], capacity=self.params["capacity"], shapes=[[],
             [self.params["img_shape_y"], self.params["img_shape_x"], self.params["num_colors"]]])
 
         gradient_list = []
@@ -283,8 +283,8 @@ class cae(object):
                 self.b_list = []
                 self.b_gdn_list = []
                 self.w_gdn_list = []
-                self.mle_weights = ef.thetas(self.params["n_mem"], self.params["num_triangles"]) 
-                self.reset_mle_weights = self.mle_weights.assign(tf.ones((self.params["n_mem"], self.params["num_triangles"])))
+                self.mle_thetas = ef.thetas(self.params["n_mem"], self.params["num_triangles"]) 
+                self.reset_mle_thetas = self.mle_thetas.assign(tf.ones((self.params["n_mem"], self.params["num_triangles"])))
                 w_inits = [tf.contrib.layers.xavier_initializer_conv2d(uniform=False,
                   seed=self.params["seed"], dtype=tf.float32)
                   for _ in np.arange(self.params["num_layers"]/2)]
@@ -297,9 +297,9 @@ class cae(object):
                     self.params["relu"], self.params["god_damn_network"])
                   if layer_idx == self.params["num_layers"]/2-1:
                     u_resh = tf.reshape(u_out, [self.params["effective_batch_size"], self.params["n_mem"]])
-                    ll = ef.log_likelihood(u_resh, self.mle_weights, self.triangle_centers)
-                    self.mle_update = ef.mle(ll, self.mle_weights, self.params["mle_lr"])
-                    self.u_probs = ef.prob_est(u_resh, self.mle_weights, self.triangle_centers)
+                    ll = ef.log_likelihood(u_resh, self.mle_thetas, self.triangle_centers)
+                    self.mle_update = ef.mle(ll, self.mle_thetas, self.params["mle_lr"])
+                    self.u_probs = ef.prob_est(u_resh, self.mle_thetas, self.triangle_centers)
                     self.latent_entropies = ef.calc_entropy(self.u_probs)
                     with tf.variable_scope("loss") as scope:
                       self.reg_loss = tf.reduce_mean(tf.reduce_sum(self.params["GAMMA"]

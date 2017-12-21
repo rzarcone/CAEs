@@ -11,10 +11,10 @@ params = {}
 params["n_mem"] = 7680  #32768 #49152 for color, 32768 for grayscale
 
 #general params
-params["run_name"] = "test_model"
+params["run_name"] = "ent_test_full"
 #params["file_location"] = "/media/tbell/datasets/natural_images.txt"
 params["file_location"] = "/media/tbell/datasets/test_images.txt"
-params["gpu_ids"] = ["0"]
+params["gpu_ids"] = ['0','1']
 params["output_location"] = os.path.expanduser("~")+"/CAE_Project/CAEs/model_outputs/"+params["run_name"]
 params["num_threads"] = 6
 params["num_epochs"] = 20
@@ -24,7 +24,7 @@ params["eval_interval"] = 1
 params["seed"] = 1234567890
 
 #checkpoint params
-params["run_from_check"] = True
+params["run_from_check"] = True 
 params["check_load_run_name"] = "7680_med_compress_pcm"
 params["check_load_path"] = os.path.expanduser("~")+"/CAE_Project/CAEs/model_outputs/"+params["check_load_run_name"]+"/checkpoints/chkpt_ep39-45040"
 

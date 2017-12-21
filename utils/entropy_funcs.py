@@ -72,4 +72,6 @@ def calc_entropy(probs):
     Outputs:
         entropy [num_latent]
     """
-    return -tf.reduce_sum(tf.multiply(probs, tf.log(probs)), axis=[0], name="entropy")
+    plogp = tf.multiply(probs, tf.log(probs), name="plogp")
+    plogp_zeros = tf.where(tf.less_equal(probs, tf.zeros_like(probs)), tf.zeros_like(plogp), plogp, name="plogp_select")
+    return -tf.reduce_sum(plogp_zeros, axis=[0], name="entropy")
