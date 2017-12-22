@@ -1,9 +1,8 @@
-import matplotlib
-matplotlib.use("Agg")
-import os
 import tensorflow as tf
-import utils.plot_functions as pf
+import matplotlib.pyplot as plt
 import numpy as np
+import os
+from tensorflow.python import debug as tf_debug
 from cae_model import cae
 
 params = {}
@@ -11,7 +10,7 @@ params = {}
 params["n_mem"] = 7680  #32768 #49152 for color, 32768 for grayscale
 
 #general params
-params["run_name"] = "ent_test_med_compress"
+params["run_name"] = "debug_ent_test_med_compress"
 #params["file_location"] = "/media/tbell/datasets/natural_images.txt"
 params["file_location"] = "/media/tbell/datasets/test_images.txt"
 params["gpu_ids"] = ["0"]#['0','1']
@@ -74,7 +73,11 @@ config.gpu_options.allow_growth = True
 config.allow_soft_placement = True
 config.log_device_placement = False # for debugging - log devices used by each variable
 
+
 with tf.Session(config=config, graph=cae_model.graph) as sess:
+  sess = tf_debug.LocalCLIDebugWrapperSession(sess)
+  sess.add_tensor_filter("has_inf_or_nan", tf_debug.has_inf_or_nan)
+
   sess.run(cae_model.init_op)
   if cae_model.params["run_from_check"] == True:
     cae_model.full_saver.restore(sess, cae_model.params["check_load_path"])

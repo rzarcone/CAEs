@@ -1,9 +1,9 @@
 import tensorflow as tf
 
-def thetas(num_latent, num_tri):
-    theta_init = tf.truncated_normal((num_latent, num_tri), mean=1.0, stddev=0.1,
+def construct_thetas(num_latent, num_tri):
+    theta_init = tf.truncated_normal((num_latent, num_tri), mean=1.0, stddev=0.01,
       dtype=tf.float32, name="theta_init")
-    return tf.Variable(theta_init, name="thetas")
+    return (tf.Variable(theta_init, name="thetas"), theta_init)
 
 def weights(thetas):
     return tf.exp(thetas)
@@ -48,7 +48,7 @@ def prob_est(latent_vals, thetas, tri_locs):
         prob_est [num_batch, num_latent]
     """
     tris = eval_triangle(latent_vals, weights(thetas), tri_locs) # [num_batch, num_latent, num_tri]
-    prob_est = tf.divide(tf.reduce_sum(tris, axis=[2]), tf.expand_dims(zeta(thetas), axis=0), name="prob_est")
+    prob_est = tf.divide(tf.reduce_sum(tris, axis=[2]), 1e-12+tf.expand_dims(zeta(thetas), axis=0), name="prob_est")
     return prob_est
 
 def log_likelihood(latent_vals, thetas, tri_locs):
@@ -62,7 +62,8 @@ def log_likelihood(latent_vals, thetas, tri_locs):
     """
     probs = prob_est(latent_vals, weights(thetas), tri_locs) # [num_batch, num_latent]
     logprobs = tf.log(probs, name="log_probs")
-    logprobs_zero = tf.where(tf.less_equal(probs, tf.zeros_like(probs)), tf.zeros_like(logprobs), logprobs, name="logprob_where")
+    logprobs_zero = tf.where(tf.less_equal(probs, tf.zeros_like(probs)), tf.zeros_like(logprobs),
+      logprobs, name="logprob_where")
     return tf.reduce_sum(logprobs_zero, axis=[0], name="log_likelihood")
 
 def mle(log_likelihood, thetas, learning_rate):
@@ -77,5 +78,6 @@ def calc_entropy(probs):
         entropy [num_latent]
     """
     plogp = tf.multiply(probs, tf.log(probs), name="plogp")
-    plogp_zeros = tf.where(tf.less_equal(probs, tf.zeros_like(probs)), tf.zeros_like(plogp), plogp, name="plogp_where")
+    plogp_zeros = tf.where(tf.less_equal(probs, tf.zeros_like(probs)), tf.zeros_like(plogp),
+      plogp, name="plogp_where")
     return -tf.reduce_sum(plogp_zeros, axis=[0], name="entropy")

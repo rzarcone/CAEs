@@ -283,8 +283,8 @@ class cae(object):
                 self.b_list = []
                 self.b_gdn_list = []
                 self.w_gdn_list = []
-                self.mle_thetas = ef.thetas(self.params["n_mem"], self.params["num_triangles"])
-                self.reset_mle_thetas = self.mle_thetas.assign(tf.ones((self.params["n_mem"], self.params["num_triangles"])))
+                self.mle_thetas, theta_init = ef.construct_thetas(self.params["n_mem"], self.params["num_triangles"])
+                self.reset_mle_thetas = self.mle_thetas.assign(theta_init)
                 w_inits = [tf.contrib.layers.xavier_initializer_conv2d(uniform=False,
                   seed=self.params["seed"], dtype=tf.float32)
                   for _ in np.arange(self.params["num_layers"]/2)]
@@ -300,7 +300,8 @@ class cae(object):
                     ll = ef.log_likelihood(u_resh, self.mle_thetas, self.triangle_centers)
                     self.mle_update = ef.mle(ll, self.mle_thetas, self.params["mle_lr"])
                     self.u_probs = ef.prob_est(u_resh, self.mle_thetas, self.triangle_centers)
-                    self.latent_entropies = ef.calc_entropy(self.u_probs)
+                    self.latent_entropies = tf.identity(ef.calc_entropy(self.u_probs),
+                      name="latent_entropies")
                     with tf.variable_scope("loss") as scope:
                       self.reg_loss = tf.reduce_mean(tf.reduce_sum(self.params["GAMMA"]
                         * (tf.nn.relu(u_out - self.params["mem_v_max"])
@@ -322,7 +323,8 @@ class cae(object):
                 with tf.variable_scope("loss") as scope:
                   self.recon_loss = tf.reduce_mean(tf.reduce_sum(tf.square(tf.subtract(self.u_list[0],
                     self.u_list[-1])), axis=[1,2,3]))
-                  self.ent_loss = self.params["LAMBDA"] * tf.reduce_sum(self.latent_entropies)
+                  self.ent_loss = tf.multiply(self.params["LAMBDA"],
+                    tf.reduce_sum(self.latent_entropies), name="entropy_loss")
                   loss_list = [self.recon_loss, self.reg_loss, self.ent_loss]
                   self.total_loss = tf.add_n(loss_list, name="total_loss")
 
