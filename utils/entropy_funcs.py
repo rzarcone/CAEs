@@ -6,7 +6,7 @@ def construct_thetas(num_latent, num_tri):
     return (tf.Variable(theta_init, name="thetas"), theta_init)
 
 def weights(thetas):
-    return tf.exp(thetas)
+    return tf.exp(thetas, name="weights")
 
 def zeta(thetas):
     """
@@ -16,7 +16,7 @@ def zeta(thetas):
     Output:
         zeta [num_latent]
     """
-    return tf.reduce_sum(weights(thetas), axis=[1])
+    return tf.reduce_sum(weights(thetas), axis=[1], name="zetas")
 
 def eval_triangle(x, h, n):
     """
@@ -48,8 +48,14 @@ def prob_est(latent_vals, thetas, tri_locs):
         prob_est [num_batch, num_latent]
     """
     tris = eval_triangle(latent_vals, weights(thetas), tri_locs) # [num_batch, num_latent, num_tri]
-    prob_est = tf.divide(tf.reduce_sum(tris, axis=[2]), 1e-12+tf.expand_dims(zeta(thetas), axis=0), name="prob_est")
+    prob_est = tf.divide(tf.reduce_sum(tris, axis=[2], name="tris_reduced"),
+        1e-12+tf.expand_dims(zeta(thetas), axis=0, name="expanded_zeta"), name="prob_est")
     return prob_est
+
+def safe_log(probs, eps=1e-9):
+  logprob = tf.where(tf.less_equal(probs, tf.zeros_like(probs)+eps, name="prob_le_zero"),
+    tf.zeros_like(probs), tf.log(probs, name="log_prob"), name="safelog_where")
+  return logprob
 
 def log_likelihood(latent_vals, thetas, tri_locs):
     """
@@ -61,14 +67,13 @@ def log_likelihood(latent_vals, thetas, tri_locs):
         log_likelihood [num_latent]
     """
     probs = prob_est(latent_vals, weights(thetas), tri_locs) # [num_batch, num_latent]
-    logprobs = tf.log(probs, name="log_probs")
-    logprobs_zero = tf.where(tf.less_equal(probs, tf.zeros_like(probs)), tf.zeros_like(logprobs),
-      logprobs, name="logprob_where")
-    return tf.reduce_sum(logprobs_zero, axis=[0], name="log_likelihood")
+    logprobs = safe_log(probs)
+    return tf.reduce_sum(logprobs, axis=[0], name="log_likelihood")
 
 def mle(log_likelihood, thetas, learning_rate):
-    grads = tf.gradients(log_likelihood, thetas)[0]
-    return thetas.assign_add(tf.multiply(tf.constant(learning_rate), grads))
+    grads = tf.gradients(log_likelihood, thetas, name="ll_grads")[0]
+    op = thetas.assign_add(tf.multiply(tf.constant(learning_rate), grads, name="rescale_grad"))
+    return op
 
 def calc_entropy(probs):
     """
@@ -77,7 +82,5 @@ def calc_entropy(probs):
     Outputs:
         entropy [num_latent]
     """
-    plogp = tf.multiply(probs, tf.log(probs), name="plogp")
-    plogp_zeros = tf.where(tf.less_equal(probs, tf.zeros_like(probs)), tf.zeros_like(plogp),
-      plogp, name="plogp_where")
-    return -tf.reduce_sum(plogp_zeros, axis=[0], name="entropy")
+    plogp = tf.multiply(probs, safe_log(probs), name="plogp")
+    return -tf.reduce_sum(plogp, axis=[0], name="entropy")
