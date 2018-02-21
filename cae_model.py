@@ -112,6 +112,11 @@ class cae(object):
         #r_trans =  tensor_scaler(r, orig_RMIN, orig_RMAX)
         return tf.reshape(r, shape=u_in.get_shape(), name="mem_r")
 
+    """Sigmoidal non-linearity"""
+    def sigmoid(self, u_in, beta=1):
+      u_out = tf.subtract(tf.multiply(2.0, tf.divide(1.0, tf.add(1.0, tf.exp(tf.multiply(-beta, u_in))))), 1.0)
+      return u_out
+
     """Devisive normalizeation nonlinearity"""
     def gdn(self, layer_num, u_in, inverse):
       u_in_shape = u_in.get_shape()
@@ -297,11 +302,11 @@ class cae(object):
                     self.params["relu"], self.params["god_damn_network"])
                   if layer_idx == self.params["num_layers"]/2-1:
                     u_resh = tf.reshape(u_out, [self.params["effective_batch_size"], self.params["n_mem"]])
-                    ll = ef.log_likelihood(u_resh, self.mle_thetas, self.triangle_centers)
+                    self.u_sig = self.sigmoid(u_resh, self.params["sigmoid_beta"])
+                    ll = ef.log_likelihood(self.u_sig, self.mle_thetas, self.triangle_centers)
                     self.mle_update = ef.mle(ll, self.mle_thetas, self.params["mle_lr"])
-                    self.u_probs = ef.prob_est(u_resh, self.mle_thetas, self.triangle_centers)
-                    self.latent_entropies = tf.identity(ef.calc_entropy(self.u_probs),
-                      name="latent_entropies")
+                    u_probs = ef.prob_est(self.u_sig, self.mle_thetas, self.triangle_centers)
+                    latent_entropies = tf.identity(ef.calc_entropy(u_probs), name="latent_entropies")
                     with tf.variable_scope("loss") as scope:
                       self.reg_loss = tf.reduce_mean(tf.reduce_sum(self.params["GAMMA"]
                         * (tf.nn.relu(u_out - self.params["mem_v_max"])
@@ -310,9 +315,9 @@ class cae(object):
                       gpu_index = int(gpu_id) if len(self.params["gpu_ids"]) > 1 else 0
                       memristor_std_eps_slice = tf.split(value=self.memristor_std_eps,
                         num_or_size_splits=self.params["num_gpus"], axis=0)[gpu_index]
-                      u_out = self.memristorize(u_out, memristor_std_eps_slice)
+                      u_out = self.memristorize(tf.reshape(self.u_sig, u_out.get_shape()), memristor_std_eps_slice)
                     else: # add uniform noise if not using channels
-                      u_out = tf.reshape(tf.add(u_resh, self.quantization_noise, name="noisy_latent_u"),
+                      u_out = tf.reshape(tf.add(self.u_sig, self.quantization_noise, name="noisy_latent_u"),
                         u_out.get_shape())
                   self.w_list.append(w)
                   self.u_list.append(u_out)
@@ -324,7 +329,7 @@ class cae(object):
                   self.recon_loss = tf.reduce_mean(tf.reduce_sum(tf.square(tf.subtract(self.u_list[0],
                     self.u_list[-1])), axis=[1,2,3]))
                   self.ent_loss = tf.multiply(self.params["LAMBDA"],
-                    tf.reduce_sum(self.latent_entropies), name="entropy_loss")
+                    tf.reduce_sum(latent_entropies), name="entropy_loss")
                   loss_list = [self.recon_loss, self.reg_loss, self.ent_loss]
                   self.total_loss = tf.add_n(loss_list, name="total_loss")
 

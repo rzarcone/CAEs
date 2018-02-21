@@ -8,19 +8,19 @@ from cae_model import cae
 
 params = {}
 #shitty hard coding
-params["n_mem"] = 7680  #32768 #49152 for color, 32768 for grayscale
+params["n_mem"] = 32768 #7680 for med_compress  #32768 #49152 for color, 32768 for grayscale
 
 #general params
-params["run_name"] = "ent_test_med_compress"
+params["run_name"] = "ent_nomem_32768"
 #params["file_location"] = "/media/tbell/datasets/natural_images.txt"
 params["file_location"] = "/media/tbell/datasets/test_images.txt"
 params["gpu_ids"] = ["0"]#['0','1']
 params["output_location"] = os.path.expanduser("~")+"/CAE_Project/CAEs/model_outputs/"+params["run_name"]
 params["num_threads"] = 6
 params["num_epochs"] = 20
-#params["epoch_size"] = 112682
-params["epoch_size"] = 49900
-params["eval_interval"] = 1
+params["epoch_size"] = 112682
+#params["epoch_size"] = 49900
+params["eval_interval"] = 10
 params["seed"] = 1234567890
 
 #checkpoint params
@@ -49,18 +49,19 @@ params["relu"] = False
 
 #layer dimensions
 params["input_channels"] = [params["num_colors"], 128, 128]
-params["output_channels"] = [128, 128, 30]
+params["output_channels"] = [128, 128, 128]
 params["patch_size_y"] = [9, 5, 5]
 params["strides"] = [4, 2, 2]
 
 #memristor params
-params["GAMMA"] = 1.0  # slope of the out of bounds cost
+params["GAMMA"] = 0.0  # slope of the out of bounds cost
 params["mem_v_min"] = -1.0
 params["mem_v_max"] = 1.0
 params["gauss_chan"] = False
 
 #entropy params
 params["LAMBDA"] = 0.1
+params["sigmoid_beta"] = 2.0
 params["num_triangles"] = 20
 params["mle_lr"] = 0.1
 params["num_mle_steps"] = 5 
@@ -94,13 +95,11 @@ with tf.Session(config=config, graph=cae_model.graph) as sess:
         mem_std_eps = np.random.standard_normal((cae_model.params["effective_batch_size"],
           cae_model.params["n_mem"])).astype(np.float32)
         feed_dict[cae_model.memristor_std_eps] = mem_std_eps
-      # Update MLE estimate
       sess.run(cae_model.reset_mle_thetas, feed_dict)
       for mle_step in range(params["num_mle_steps"]):
         sess.run(cae_model.mle_update, feed_dict)
       # Update network weights
       _, step = sess.run([cae_model.train_op, cae_model.global_step], feed_dict)
-      # Eval model
       if step % cae_model.params["eval_interval"] == 0:
         model_vars = [cae_model.merged_summaries, cae_model.reg_loss, cae_model.recon_loss,
           cae_model.ent_loss, cae_model.total_loss, cae_model.batch_MSE]
@@ -108,7 +107,7 @@ with tf.Session(config=config, graph=cae_model.graph) as sess:
         cae_model.train_writer.add_summary(summary, step)
         print("step %04d\treg_loss %03g\trecon_loss %g\tent_loss %g\ttotal_loss %g\tMSE %g"%(
           step, ev_reg_loss, ev_recon_loss, ev_ent_loss, ev_total_loss, mse))
-        
+
     #Checkpoint and save image of weights each epoch
     cae_model.full_saver.save(sess, save_path=cae_model.params["output_location"]+"/checkpoints/chkpt",
       global_step=cae_model.global_step)

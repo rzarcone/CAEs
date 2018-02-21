@@ -3,7 +3,7 @@ import tensorflow as tf
 def construct_thetas(num_latent, num_tri):
     theta_init = tf.truncated_normal((num_latent, num_tri), mean=1.0, stddev=0.01,
       dtype=tf.float32, name="theta_init")
-    return (tf.Variable(theta_init, name="thetas"), theta_init)
+    return (tf.Variable(initial_value=theta_init, name="thetas"), theta_init)
 
 def weights(thetas):
     return tf.exp(thetas, name="weights")
@@ -49,7 +49,7 @@ def prob_est(latent_vals, thetas, tri_locs):
     """
     tris = eval_triangle(latent_vals, weights(thetas), tri_locs) # [num_batch, num_latent, num_tri]
     prob_est = tf.divide(tf.reduce_sum(tris, axis=[2], name="tris_reduced"),
-        1e-12+tf.expand_dims(zeta(thetas), axis=0, name="expanded_zeta"), name="prob_est")
+        1e-9+tf.expand_dims(zeta(thetas), axis=0, name="expanded_zeta"), name="prob_est")
     return prob_est
 
 def safe_log(probs, eps=1e-9):
